@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Fondo negro redondeado -->
+  <rect width="64" height="64" rx="14" fill="#050508"/>
+  <!-- Barra roja superior decorativa -->
+  <rect width="64" height="4" rx="2" fill="#ff2d2d"/>
+  <!-- Letra C -->
+  <text x="7" y="47" font-family="Arial Black, sans-serif" font-weight="900" font-size="30" fill="#f0eee8">C</text>
+  <!-- Letra L en rojo -->
+  <text x="33" y="47" font-family="Arial Black, sans-serif" font-weight="900" font-size="30" fill="#ff2d2d">L</text>
+</svg>

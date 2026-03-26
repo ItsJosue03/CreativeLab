@@ -1,0 +1,2124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CreativeLab — Design Portfolio</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<!-- Firebase SDK -->
+<script>
+/* ══════════════════════════════════════════════════
+   SISTEMA DE AUTENTICACIÓN LOCAL — Sin Firebase
+   Cuentas guardadas en localStorage con SHA-256
+══════════════════════════════════════════════════ */
+
+// ── Cuentas admin autorizadas ──
+const ADMIN_ACCOUNTS = [
+  {
+    id:       'admin-josue',
+    nombre:   'Josué',
+    apellido: 'CreativeLab',
+    email:    'creativelab824@gmail.com',
+    // SHA-256 de "admin2026"
+    passHash: '6051fc84a7a0d74c225fb18a496b09952da5642e60723ecae543298edd7d82d6',
+    telefono: '849 454 7811',
+    rol:      'admin'
+  },
+  {
+    id:       'admin-gio',
+    nombre:   'Gio',
+    apellido: 'Admin',
+    email:    'giomaesthersu@gmail.com',
+    // SHA-256 de "admin2026"
+    passHash: '6051fc84a7a0d74c225fb18a496b09952da5642e60723ecae543298edd7d82d6',
+    telefono: '',
+    rol:      'admin'
+  }
+];
+const ADMIN_EMAILS = ADMIN_ACCOUNTS.map(a => a.email.toLowerCase());
+
+// Función auxiliar: ¿es admin este email?
+function isAdminEmail(email) {
+  return ADMIN_EMAILS.includes((email || '').toLowerCase());
+}
+
+// Helpers localStorage
+function getUsers() { try { return JSON.parse(localStorage.getItem('cl_users') || '[]'); } catch { return []; } }
+function saveUsers(u) { localStorage.setItem('cl_users', JSON.stringify(u)); }
+function getCurrentUser() { try { return JSON.parse(sessionStorage.getItem('cl_currentUser') || 'null'); } catch { return null; } }
+function setCurrentUser(u) { sessionStorage.setItem('cl_currentUser', JSON.stringify(u)); }
+function clearCurrentUser() { sessionStorage.removeItem('cl_currentUser'); }
+
+// SHA-256 nativo del navegador
+// SHA-256: usa crypto.subtle si está disponible (HTTPS), si no usa implementación pura JS
+async function sha256(str) {
+  if (window.crypto && crypto.subtle) {
+    try {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    } catch(e) { /* fallback below */ }
+  }
+  // Pure JS fallback (funciona en HTTP/file://)
+  return sha256Pure(str);
+}
+function sha256Pure(ascii) {
+  function rightRotate(value,amount){return(value>>>amount)|(value<<(32-amount));}
+  const mathPow=Math.pow;
+  const maxWord=mathPow(2,32);
+  let result='';
+  const words=[];
+  const asciiBitLength=ascii.length*8;
+  let hash=[];
+  let k=[];
+  let primeCounter=0;
+  const isComposite={};
+  for(let candidate=2;primeCounter<64;candidate++){
+    if(!isComposite[candidate]){
+      for(let i=candidate*candidate;i<313;i+=candidate)isComposite[i]=true;
+      hash[primeCounter]=mathPow(candidate,.5)*maxWord|0;
+      k[primeCounter++]=mathPow(candidate,1/3)*maxWord|0;
+    }
+  }
+  ascii+='\x80';
+  while(ascii.length%64-56)ascii+='\x00';
+  for(let i=0;i<ascii.length;i++){
+    const j=ascii.charCodeAt(i);
+    if(j>>8)return '';
+    words[i>>2]|=j<<((3-i)%4*8);
+  }
+  words[words.length]=((asciiBitLength/maxWord)|0);
+  words[words.length]=(asciiBitLength|0);
+  for(let j=0;j<words.length;){
+    const w=words.slice(j,j+=16);
+    const oldHash=hash.slice(0);
+    for(let i=0;i<64;i++){
+      const w15=w[i-15],w2=w[i-2];
+      const a=hash[0],e=hash[4];
+      const temp1=hash[7]+(rightRotate(e,6)^rightRotate(e,11)^rightRotate(e,25))+((e&hash[5])^(~e&hash[6]))+k[i]+(w[i]=i<16?w[i]:((rightRotate(w2,17)^rightRotate(w2,19)^(w2>>>10))+w[i-7]+(rightRotate(w15,7)^rightRotate(w15,18)^(w15>>>3))+w[i-16])|0);
+      const temp2=(rightRotate(a,2)^rightRotate(a,13)^rightRotate(a,22))+((a&hash[1])^(a&hash[2])^(hash[1]&hash[2]));
+      hash=[(temp1+temp2)|0].concat(hash);hash[4]=(hash[4]+temp1)|0;hash.pop();
+    }
+    for(let i=0;i<8;i++)hash[i]=(hash[i]+oldHash[i])|0;
+  }
+  for(let i=0;i<8;i++){
+    for(let j=3;j+1;j--){
+      const b=(hash[i]>>(j*8))&255;
+      result+=((b<16)?'0':'')+b.toString(16);
+    }
+  }
+  return result;
+}
+
+// Inicializar cuentas admin en localStorage si no existen
+async function initAdminAccount() {
+  const users = getUsers();
+  let changed = false;
+  for (const acc of ADMIN_ACCOUNTS) {
+    const exists = users.find(u => u.email.toLowerCase() === acc.email.toLowerCase());
+    if (!exists) {
+      users.push({ ...acc, createdAt: new Date().toLocaleDateString('es-DO') });
+      changed = true;
+    }
+  }
+  if (changed) saveUsers(users);
+}
+
+// Actualizar UI según usuario logueado
+function updateUIForUser(user) {
+  const overlay = document.getElementById('loginOverlay');
+  if (user) {
+    // Ocultar overlay
+    overlay.classList.remove('open');
+    overlay.classList.add('hidden');
+    setTimeout(() => { overlay.style.display = 'none'; }, 650);
+
+    const isAdmin = isAdminEmail(user.email);
+    window._currentRole = isAdmin ? 'admin' : 'cliente';
+
+    const displayName = user.nombre + (user.apellido ? ' ' + user.apellido : '');
+    document.getElementById('navUserName').textContent = displayName;
+    document.getElementById('navAvatarLetter').textContent = displayName.charAt(0).toUpperCase();
+    document.getElementById('navUserArea').style.display = 'flex';
+    document.getElementById('navLoginBtn').style.display  = 'none';
+
+    const roleBadge = document.getElementById('navRoleBadge');
+    if (isAdmin) {
+      roleBadge.textContent = '👑 Admin';
+      roleBadge.className   = 'nav-role admin';
+      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
+      const fa = document.getElementById('footerAdminLink');
+      if (fa) fa.style.display = 'inline';
+    } else {
+      roleBadge.textContent = 'Cliente';
+      roleBadge.className   = 'nav-role cliente';
+      document.getElementById('adminPanelBtn').style.display = 'none';
+      const fa = document.getElementById('footerAdminLink');
+      if (fa) fa.style.display = 'none';
+    }
+  } else {
+    // Mostrar overlay
+    overlay.style.display = 'flex';
+    overlay.classList.add('open');
+    overlay.classList.remove('hidden');
+    document.getElementById('navUserArea').style.display   = 'none';
+    document.getElementById('navLoginBtn').style.display   = 'inline-flex';
+    document.getElementById('adminPanelBtn').style.display = 'none';
+    const fa = document.getElementById('footerAdminLink');
+    if (fa) fa.style.display = 'none';
+  }
+}
+
+// Arrancar al cargar la página
+window.addEventListener('DOMContentLoaded', async () => {
+  await initAdminAccount();
+  const user = getCurrentUser();
+  updateUIForUser(user);
+});
+</script>
+<style>
+/* ══════════════════════════════
+   CSS VARIABLES & RESET
+══════════════════════════════ */
+:root {
+  --bg: #050508;
+  --surface: #0d0d14;
+  --surface2: #131320;
+  --border: rgba(255,255,255,0.07);
+  --text: #f0eee8;
+  --muted: #6b6878;
+  --accent: #ff2d2d;
+  --accent2: #7b5cf7;
+  --glow: rgba(255,45,45,0.2);
+  --radius: 100px;
+  --transition: .35s cubic-bezier(.16,1,.3,1);
+}
+body.light-mode {
+  --bg: #f5f4f0; --surface: #ebe9e3; --surface2: #dddbd5;
+  --border: rgba(0,0,0,0.08); --text: #0e0d0b; --muted: #7a7870;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: 'Barlow', sans-serif; font-weight: 700; overflow-x: hidden; }
+@media (pointer: coarse) {
+  /* Mejor feedback táctil */
+  button, a, [onclick] { -webkit-tap-highlight-color: rgba(255,45,45,0.15); }
+  /* Touch targets mínimos 44px */
+  .nav-cta, .btn, .auth-btn, .toggle-pill, .tab-btn { min-height: 44px; }
+  .send-btn, .lightbox-close, .modal-close { min-width: 44px; min-height: 44px; }
+  /* iOS: evitar zoom automático en inputs (requiere font-size >= 16px) */
+  input, select, textarea { font-size: 16px !important; }
+  /* Auth card en móvil */
+  .auth-card { padding: 2rem 1.2rem; border-radius: 16px; }
+  .auth-btn { min-height: 52px; font-size: 1rem; }
+  .auth-tab { min-height: 44px; font-size: .82rem; }
+  .auth-input-group input { padding: 1rem; min-height: 48px; }
+  .auth-row { grid-template-columns: 1fr; }
+  #loginOverlay { align-items: flex-start; padding: .8rem; }
+}
+body.light-mode #stars-canvas { opacity: 0.12; }
+
+
+
+/* STARS */
+#stars-canvas { position:fixed; inset:0; z-index:0; pointer-events:none; }
+
+/* ══════════════════════════════
+   NAV
+══════════════════════════════ */
+nav {
+  position:fixed; top:0; left:0; right:0; z-index:1000;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:1.2rem 3rem;
+  background:linear-gradient(to bottom, rgba(5,5,8,0.96), transparent);
+  backdrop-filter:blur(4px);
+}
+/* Hamburger */
+#navHamburger {
+  display:none; flex-direction:column; justify-content:center; gap:5px;
+  width:40px; height:40px; background:transparent; border:1px solid rgba(255,255,255,.12);
+  border-radius:8px; cursor:pointer; padding:8px; transition:border-color .2s;
+}
+#navHamburger:hover { border-color:var(--accent); }
+#navHamburger span { display:block; width:100%; height:2px; background:var(--text); border-radius:2px; transition:all .3s; }
+#navHamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
+#navHamburger.open span:nth-child(2) { opacity:0; }
+#navHamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+/* Mobile nav menu */
+#mobileMenu {
+  display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+  background:rgba(5,5,8,.97); z-index:999; flex-direction:column;
+  align-items:center; justify-content:center; gap:2rem;
+  backdrop-filter:blur(12px);
+}
+#mobileMenu.open { display:flex; animation:fadeUp .3s both; }
+#mobileMenu a {
+  font-family:'Bebas Neue',sans-serif; font-size:2.2rem; letter-spacing:.14em;
+  color:var(--muted); text-decoration:none; transition:color .2s; cursor:pointer;
+}
+#mobileMenu a:hover { color:var(--accent); }
+.nav-logo { font-family:'Bebas Neue',sans-serif; font-size:1.6rem; letter-spacing:.12em; color:var(--text); text-decoration:none; }
+.nav-logo span { color:var(--accent); }
+.nav-links { display:flex; gap:2rem; list-style:none; }
+.nav-links a { font-size:.78rem; font-weight:500; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); text-decoration:none; transition:color .2s; }
+.nav-links a:hover { color:var(--accent); }
+.nav-controls { display:flex; align-items:center; gap:.6rem; }
+
+/* Theme & Lang toggles */
+.toggle-pill {
+  display:flex; align-items:center; gap:.3rem;
+  background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
+  border-radius:var(--radius); padding:.32rem .7rem;
+  cursor:pointer; transition:border-color .25s, background .25s;
+}
+.toggle-pill:hover { border-color:var(--accent); background:rgba(255,45,45,0.08); }
+.t-icon { font-size:.85rem; line-height:1; transition:opacity .25s; }
+.t-moon { opacity:1; } .t-sun { opacity:.35; }
+body.light-mode .t-moon { opacity:.35; } body.light-mode .t-sun { opacity:1; }
+.lang-opt { font-size:.72rem; font-weight:800; letter-spacing:.1em; color:var(--muted); transition:color .2s; }
+.lang-opt.active { color:var(--accent); }
+.lang-sep { font-size:.6rem; color:rgba(255,255,255,.15); }
+
+/* Nav user area */
+#navUserArea { display:none; align-items:center; gap:.5rem; }
+#navUserName { font-size:.78rem; font-weight:800; color:var(--text); }
+.nav-avatar { width:30px; height:30px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:.7rem; font-weight:900; color:#fff; }
+
+/* ══════════════════════════════
+   BUTTONS (pill, animated)
+══════════════════════════════ */
+.btn {
+  display:inline-flex; align-items:center; gap:.6rem;
+  font-family:'Barlow',sans-serif; font-size:.85rem; font-weight:900;
+  letter-spacing:.1em; text-transform:uppercase;
+  padding:.85rem 2rem; border-radius:var(--radius);
+  border:none; cursor:pointer; text-decoration:none;
+  position:relative; overflow:hidden;
+  will-change:transform;
+  transition:transform var(--transition), box-shadow var(--transition);
+}
+.btn::before { content:''; position:absolute; inset:0; background:linear-gradient(120deg,transparent,rgba(255,255,255,0.25),transparent); transform:translateX(-100%); transition:transform .55s; border-radius:var(--radius); }
+.btn:hover::before { transform:translateX(100%); }
+.btn:hover { transform:translateY(-4px) scale(1.05); }
+.btn:active { transform:scale(0.94) !important; transition:transform .1s !important; }
+.btn-red { background:var(--accent); color:#fff; box-shadow:0 4px 24px rgba(255,45,45,.25); }
+.btn-red:hover { box-shadow:0 12px 36px rgba(255,45,45,.5), 0 0 0 2px rgba(255,45,45,.3); }
+.btn-outline { background:transparent; color:var(--text); border:1.5px solid rgba(255,255,255,.2); }
+.btn-outline::after { content:''; position:absolute; inset:-2px; border-radius:var(--radius); border:1.5px solid var(--accent); opacity:0; transform:scale(1.04); transition:opacity .35s, transform .35s; }
+.btn-outline:hover::after { opacity:1; transform:scale(1); }
+.btn-outline:hover { box-shadow:0 8px 28px rgba(255,45,45,.15); }
+.btn-sm { padding:.55rem 1.3rem; font-size:.75rem; }
+
+/* Nav CTA */
+.nav-cta { font-family:'Bebas Neue',sans-serif; font-size:.9rem; letter-spacing:.14em; background:var(--accent); color:#fff; border:none; padding:.5rem 1.4rem; border-radius:var(--radius); cursor:pointer; position:relative; overflow:hidden; transition:transform var(--transition), box-shadow var(--transition); }
+.nav-cta::before { content:''; position:absolute; inset:0; background:linear-gradient(120deg,transparent,rgba(255,255,255,.2),transparent); transform:translateX(-100%); transition:transform .45s; border-radius:var(--radius); }
+.nav-cta:hover::before { transform:translateX(100%); }
+.nav-cta:hover { transform:translateY(-2px); box-shadow:0 6px 24px var(--glow); }
+.nav-cta:active { transform:scale(0.94); transition:transform .1s; }
+#adminPanelBtn { display:none; }
+
+/* ══════════════════════════════
+   HERO
+══════════════════════════════ */
+#hero { position:relative; z-index:1; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:8rem 2rem 4rem; overflow:hidden; }
+.hero-noise { position:absolute; inset:0; z-index:0; pointer-events:none; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); opacity:.5; }
+.hero-grid { position:absolute; inset:0; z-index:0; pointer-events:none; background-image:linear-gradient(rgba(255,45,45,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,45,45,.03) 1px,transparent 1px); background-size:60px 60px; mask-image:radial-gradient(ellipse 80% 60% at 50% 50%,black,transparent); }
+.hero-rings { position:absolute; inset:0; z-index:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+.hero-ring { position:absolute; border-radius:50%; border:1px solid rgba(255,45,45,.07); animation:pulseRing 4s ease-out infinite; will-change:transform,opacity; }
+.hero-ring:nth-child(1){width:300px;height:300px;animation-delay:0s}
+.hero-ring:nth-child(2){width:500px;height:500px;animation-delay:.8s}
+.hero-ring:nth-child(3){width:700px;height:700px;animation-delay:1.6s}
+.hero-ring:nth-child(4){width:900px;height:900px;animation-delay:2.4s}
+@keyframes pulseRing{0%{opacity:0;transform:scale(.85)}30%{opacity:1}100%{opacity:0;transform:scale(1.15)}}
+.hero-glow { position:absolute; width:700px; height:700px; border-radius:50%; background:radial-gradient(circle,rgba(123,92,247,.12) 0%,transparent 70%); top:50%; left:50%; transform:translate(-50%,-55%); pointer-events:none; }
+.hero-badge { display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--border); background:rgba(255,255,255,.03); border-radius:var(--radius); padding:.35rem 1rem; font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-bottom:2rem; position:relative; z-index:1; animation:fadeUp .8s .1s both; }
+.hero-badge::before { content:''; width:6px; height:6px; background:var(--accent); border-radius:50%; box-shadow:0 0 8px var(--accent); animation:blink 2s infinite; }
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.hero-title { font-family:'Bebas Neue',sans-serif; font-size:clamp(5rem,14vw,13rem); line-height:.9; position:relative; z-index:1; animation:fadeUp .8s .25s both; will-change:transform,opacity; }
+.line1 { display:block; color:var(--text); }
+.line2-inline { color:var(--accent); animation:fadeIn 1s 1s both; }
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.hero-tagline { margin-top:2rem; font-size:clamp(.9rem,2vw,1.15rem); font-weight:400; color:var(--muted); max-width:520px; line-height:1.7; position:relative; z-index:1; animation:fadeUp .8s .45s both; }
+.hero-tagline em { color:var(--text); font-style:italic; }
+.hero-actions { display:flex; gap:1rem; margin-top:2.6rem; flex-wrap:wrap; justify-content:center; position:relative; z-index:1; animation:fadeUp .8s .6s both; }
+@keyframes fadeUp{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:translateY(0)}}
+
+/* ══════════════════════════════
+   PROFILE
+══════════════════════════════ */
+#profile { position:relative; z-index:1; padding:5rem 4rem; background:var(--surface); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.profile-inner { max-width:900px; margin:0 auto; display:grid; grid-template-columns:auto 1fr; gap:3.5rem; align-items:center; }
+.profile-photo-ring { width:180px; height:180px; border-radius:50%; padding:5px; position:relative; animation:spinRing 12s linear infinite; border:2px solid var(--border); will-change:transform; }
+@keyframes spinRing{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.profile-photo-ring::before { content:''; position:absolute; inset:-3px; border-radius:50%; background:conic-gradient(var(--accent) 0deg,transparent 120deg,transparent 360deg); z-index:-1; animation:spinRing 12s linear infinite; }
+.profile-photo { width:100%; height:100%; border-radius:50%; object-fit:cover; display:block; background:rgba(255,255,255,.04); }
+.profile-photo-placeholder { width:160px; height:160px; border-radius:50%; background:linear-gradient(135deg,rgba(255,45,45,.1),rgba(123,92,247,.1)); border:1.5px dashed rgba(255,45,45,.4); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.4rem; cursor:pointer; transition:all .3s; }
+.profile-photo-placeholder:hover { border-color:var(--accent); background:rgba(255,45,45,.08); transform:scale(1.04); }
+.profile-photo-placeholder svg { color:var(--accent); opacity:.7; }
+.profile-photo-placeholder span { font-size:.65rem; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+#photoInput { display:none; }
+.profile-info { display:flex; flex-direction:column; gap:1.6rem; }
+.profile-name { font-family:'Barlow',sans-serif; font-size:clamp(2rem,4vw,3rem); font-weight:900; line-height:1; letter-spacing:-.02em; }
+.profile-name span { color:var(--accent); }
+.profile-badge-pill { display:inline-flex; align-items:center; gap:.5rem; background:rgba(255,45,45,.1); border:1px solid rgba(255,45,45,.25); border-radius:var(--radius); padding:.3rem .9rem; font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); width:fit-content; margin-bottom:.4rem; }
+.profile-badge-pill::before { content:''; width:6px; height:6px; background:var(--accent); border-radius:50%; box-shadow:0 0 6px var(--accent); animation:blink 2s infinite; }
+.profile-fields { display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; }
+.profile-field { background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:14px; padding:1rem 1.2rem; transition:all .3s; position:relative; overflow:hidden; }
+.profile-field::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,var(--accent),transparent); transform:scaleX(0); transform-origin:left; transition:transform .35s; }
+.profile-field:hover { border-color:rgba(255,255,255,.12); background:rgba(255,255,255,.05); }
+.profile-field:hover::before { transform:scaleX(1); }
+.profile-field-label { font-size:.62rem; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:.3rem; }
+.profile-field-value { font-size:.92rem; font-weight:800; color:var(--text); word-break:break-all; }
+.profile-field-value.accent { color:var(--accent); }
+
+/* ══════════════════════════════
+   MARQUEE
+══════════════════════════════ */
+.marquee-section { position:relative; z-index:1; padding:2rem 0; overflow:hidden; border-top:1px solid var(--border); border-bottom:1px solid var(--border); background:var(--bg); }
+.marquee-track { display:flex; gap:3rem; width:max-content; animation:marquee 22s linear infinite; will-change:transform; }
+.marquee-item { display:flex; align-items:center; gap:1rem; font-family:'Bebas Neue',sans-serif; font-size:1.4rem; letter-spacing:.1em; color:var(--muted); white-space:nowrap; }
+.marquee-item .dot { width:5px; height:5px; background:var(--accent); border-radius:50%; }
+@keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* ══════════════════════════════
+   WORK / PORTFOLIO
+══════════════════════════════ */
+#work { position:relative; z-index:1; padding:7rem 4rem; }
+.section-header { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:3rem; }
+.section-label { font-size:.7rem; letter-spacing:.2em; text-transform:uppercase; color:var(--accent); display:flex; align-items:center; gap:.6rem; margin-bottom:.8rem; }
+.section-label::before { content:''; width:24px; height:1px; background:var(--accent); }
+.section-title { font-family:'Barlow',sans-serif; font-size:clamp(2.2rem,5vw,4rem); font-weight:900; letter-spacing:-.01em; line-height:1; }
+.filter-tabs { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:3rem; }
+.tab-btn { font-family:'Bebas Neue',sans-serif; font-size:.9rem; letter-spacing:.14em; text-transform:uppercase; padding:.55rem 1.4rem; border:1.5px solid var(--border); background:transparent; color:var(--muted); border-radius:var(--radius); cursor:pointer; position:relative; overflow:hidden; transition:all .3s var(--transition); will-change:transform; }
+.tab-btn::before { content:''; position:absolute; inset:0; background:rgba(255,45,45,.08); transform:scale(0); border-radius:var(--radius); transition:transform .3s; }
+.tab-btn:hover::before { transform:scale(1); }
+.tab-btn:hover { color:var(--text); border-color:rgba(255,255,255,.25); transform:translateY(-2px); }
+.tab-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:0 4px 20px var(--glow); transform:translateY(-2px); }
+.tab-btn:active { transform:scale(0.94) !important; transition:transform .1s !important; }
+.portfolio-grid { display:grid; grid-template-columns:repeat(12,1fr); gap:1rem; }
+.p-card { position:relative; overflow:hidden; border-radius:10px; cursor:pointer; background:var(--surface); border:1px solid var(--border); will-change:transform; transition:transform .4s var(--transition), box-shadow .4s; }
+.p-card:hover { transform:translateY(-6px); box-shadow:0 20px 60px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.1); z-index:2; }
+.p-card:active { transform:scale(.97) !important; transition:transform .1s !important; }
+.p-card.large { grid-column:span 7; aspect-ratio:16/10; }
+.p-card.medium { grid-column:span 5; aspect-ratio:4/3; }
+.p-card.small { grid-column:span 4; aspect-ratio:1; }
+.card-visual { width:100%; height:100%; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.card-overlay { position:absolute; inset:0; background:linear-gradient(to top,rgba(5,5,8,.95) 0%,rgba(5,5,8,.2) 50%,transparent 100%); opacity:0; transition:opacity .35s; display:flex; flex-direction:column; justify-content:flex-end; padding:1.6rem; z-index:2; }
+.p-card:hover .card-overlay { opacity:1; }
+.card-cat { font-size:.65rem; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); margin-bottom:.3rem; }
+.card-name { font-family:'Barlow',sans-serif; font-size:1.1rem; font-weight:800; }
+.card-desc { font-size:.76rem; color:var(--muted); margin-top:.3rem; }
+.card-arrow { position:absolute; top:1rem; right:1rem; width:32px; height:32px; background:var(--accent); border-radius:50%; display:flex; align-items:center; justify-content:center; opacity:0; transform:scale(.5); transition:all .3s .05s; z-index:3; }
+.p-card:hover .card-arrow { opacity:1; transform:scale(1); }
+.p-card.hidden { opacity:0; pointer-events:none; transform:scale(.95); }
+.visual-logo1{background:linear-gradient(135deg,#0d0d14,#1a0a2e);}
+.visual-flyer1{background:linear-gradient(135deg,#0a0a0a,#1c0a0a);}
+.visual-thumb1{background:linear-gradient(135deg,#050812,#0d1428);}
+.visual-social1{background:linear-gradient(135deg,#060a10,#0a1420);}
+.visual-logo2{background:linear-gradient(135deg,#080810,#10082a);}
+.visual-flyer2{background:linear-gradient(135deg,#080a08,#0d1a0a);}
+
+/* ══════════════════════════════
+   SERVICES
+══════════════════════════════ */
+#services { position:relative; z-index:1; padding:7rem 4rem; background:var(--surface); border-top:1px solid var(--border); }
+.services-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); margin-top:3.5rem; border:1px solid var(--border); }
+.service-card { background:var(--surface); padding:2.4rem; transition:background .25s; position:relative; overflow:hidden; }
+.service-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,var(--accent),transparent); transform:scaleX(0); transform-origin:left; transition:transform .35s; }
+.service-card:hover::before { transform:scaleX(1); }
+.service-card:hover { background:rgba(255,255,255,.03); }
+.service-icon { width:44px; height:44px; border:1px solid var(--border); border-radius:4px; display:flex; align-items:center; justify-content:center; margin-bottom:1.5rem; font-size:1.2rem; }
+.service-name { font-family:'Barlow',sans-serif; font-size:1.2rem; font-weight:900; margin-bottom:.8rem; }
+.service-desc { font-size:.82rem; color:var(--muted); line-height:1.7; font-weight:400; }
+.service-num { font-family:'Bebas Neue',sans-serif; font-size:4rem; color:rgba(255,255,255,.04); position:absolute; bottom:.5rem; right:1rem; line-height:1; user-select:none; }
+
+/* ══════════════════════════════
+   CTA / CONTACT
+══════════════════════════════ */
+#contact { position:relative; z-index:1; padding:8rem 4rem; text-align:center; overflow:hidden; }
+.cta-glow { position:absolute; width:600px; height:600px; border-radius:50%; background:radial-gradient(circle,rgba(123,92,247,.1),transparent 70%); top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; }
+.cta-title { font-family:'Bebas Neue',sans-serif; font-size:clamp(3rem,8vw,8rem); line-height:.95; position:relative; z-index:1; }
+.cta-title .accent { color:var(--accent); }
+.cta-sub { font-size:1rem; font-weight:400; color:var(--muted); max-width:440px; margin:1.5rem auto 2.5rem; line-height:1.7; position:relative; z-index:1; }
+.cta-actions { position:relative; z-index:1; display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; }
+.contact-cards { display:flex; gap:1.2rem; justify-content:center; flex-wrap:wrap; margin:2.4rem 0 2rem; position:relative; z-index:1; }
+.contact-card { display:flex; align-items:center; gap:1rem; background:rgba(255,255,255,.04); border:1.5px solid rgba(255,255,255,.1); border-radius:var(--radius); padding:.9rem 1.8rem; text-decoration:none; color:var(--text); position:relative; overflow:hidden; will-change:transform; transition:all .35s var(--transition); }
+.contact-card::before { content:''; position:absolute; inset:0; background:linear-gradient(120deg,transparent,rgba(255,45,45,.08),transparent); transform:translateX(-100%); transition:transform .5s; border-radius:var(--radius); }
+.contact-card:hover::before { transform:translateX(100%); }
+.contact-card:hover { border-color:var(--accent); transform:translateY(-4px); box-shadow:0 10px 36px rgba(255,45,45,.2); }
+.contact-card:active { transform:scale(.96) !important; transition:transform .1s !important; }
+.contact-card-icon { width:42px; height:42px; background:rgba(255,45,45,.12); border:1px solid rgba(255,45,45,.25); border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--accent); flex-shrink:0; transition:all .3s; }
+.contact-card:hover .contact-card-icon { background:var(--accent); color:#fff; }
+.contact-card-label { font-size:.68rem; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:.15rem; }
+.contact-card-value { font-family:'Bebas Neue',sans-serif; font-size:1.1rem; letter-spacing:.08em; }
+
+/* ══════════════════════════════
+   LIGHTBOX
+══════════════════════════════ */
+#lightbox { position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.92); display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity .3s; backdrop-filter:blur(8px); }
+#lightbox.open { opacity:1; pointer-events:all; }
+#lightbox img { max-width:88vw; max-height:85vh; border-radius:8px; transform:scale(.92); transition:transform .35s var(--transition); }
+#lightbox.open img { transform:scale(1); }
+.lightbox-close { position:absolute; top:1.5rem; right:1.5rem; width:44px; height:44px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; color:white; font-size:1.2rem; transition:background .2s; }
+.lightbox-close:hover { background:var(--accent); }
+
+/* ══════════════════════════════
+   DOWNLOAD CV BANNER
+══════════════════════════════ */
+#download-banner { position:relative; z-index:1; padding:6rem 4rem; background:var(--bg); border-top:1px solid var(--border); overflow:hidden; text-align:center; }
+.dl-glow { position:absolute; width:800px; height:400px; border-radius:50%; background:radial-gradient(ellipse,rgba(255,45,45,.1) 0%,transparent 70%); top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; }
+.dl-inner { position:relative; z-index:1; max-width:700px; margin:0 auto; display:flex; flex-direction:column; align-items:center; gap:2rem; }
+.dl-title { font-family:'Bebas Neue',sans-serif; font-size:clamp(2.8rem,7vw,6rem); line-height:.95; }
+.dl-sub { font-size:1rem; font-weight:400; color:var(--muted); max-width:480px; line-height:1.7; }
+.dl-btn { display:inline-flex; align-items:center; gap:1rem; background:var(--text); color:var(--bg); font-family:'Barlow',sans-serif; font-size:1rem; font-weight:900; letter-spacing:.1em; text-transform:uppercase; padding:1.2rem 3rem; border:none; border-radius:var(--radius); cursor:pointer; width:100%; max-width:420px; justify-content:center; position:relative; overflow:hidden; will-change:transform; transition:all .35s var(--transition); }
+.dl-btn::before { content:''; position:absolute; inset:0; background:linear-gradient(135deg,var(--accent),#ff6b6b); opacity:0; transition:opacity .3s; border-radius:var(--radius); }
+.dl-btn:hover { transform:translateY(-4px) scale(1.02); box-shadow:0 16px 50px rgba(255,45,45,.35); color:#fff; }
+.dl-btn:hover::before { opacity:1; }
+.dl-btn:active { transform:scale(.96) !important; transition:transform .1s !important; }
+.dl-btn span, .dl-icon { position:relative; z-index:1; }
+.dl-icon { display:flex; align-items:center; justify-content:center; width:36px; height:36px; background:rgba(0,0,0,.15); border-radius:50%; transition:transform .3s; }
+.dl-btn:hover .dl-icon { transform:translateY(3px); }
+
+/* ══════════════════════════════
+   MODAL BASE
+══════════════════════════════ */
+.modal-overlay { position:fixed; inset:0; z-index:20000; background:rgba(0,0,0,.78); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity .3s; padding:1rem; }
+.modal-overlay.open { opacity:1; pointer-events:all; }
+.modal-box { background:#0d0d14; border:1px solid rgba(255,255,255,.1); border-radius:20px; padding:2.8rem 2.4rem; width:100%; max-width:440px; position:relative; transform:translateY(20px) scale(.97); transition:transform .35s var(--transition); box-shadow:0 40px 100px rgba(0,0,0,.6); overflow-y:auto; max-height:90vh; }
+.modal-overlay.open .modal-box { transform:translateY(0) scale(1); }
+.modal-close { position:absolute; top:1rem; right:1rem; width:32px; height:32px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); border-radius:50%; color:var(--muted); font-size:.85rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .2s; }
+.modal-close:hover { background:var(--accent); color:#fff; }
+.modal-logo { font-family:'Bebas Neue',sans-serif; font-size:1.6rem; letter-spacing:.12em; color:var(--text); margin-bottom:1.2rem; text-align:center; }
+.modal-logo span { color:var(--accent); }
+.modal-title { font-family:'Barlow',sans-serif; font-size:1.4rem; font-weight:900; text-align:center; margin-bottom:.5rem; color:var(--text); }
+.modal-sub { font-size:.82rem; font-weight:400; color:var(--muted); text-align:center; line-height:1.6; margin-bottom:1.8rem; }
+.modal-tabs { display:flex; gap:.5rem; margin-bottom:1.5rem; }
+.modal-tab { flex:1; padding:.6rem; border-radius:var(--radius); border:1.5px solid var(--border); background:transparent; color:var(--muted); font-family:'Barlow',sans-serif; font-size:.78rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; cursor:pointer; transition:all .2s; }
+.modal-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* Form fields */
+.form-group { display:flex; flex-direction:column; gap:.3rem; margin-bottom:.8rem; }
+.form-group label { font-size:.65rem; font-weight:800; letter-spacing:.15em; text-transform:uppercase; color:var(--muted); }
+.form-group input, .form-group select, .form-group textarea {
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+  border-radius:12px; padding:.75rem 1rem; color:var(--text);
+  font-family:'Barlow',sans-serif; font-weight:700; font-size:.85rem;
+  outline:none; transition:border-color .2s, box-shadow .2s; width:100%;
+}
+.form-group select { appearance:none; cursor:pointer; }
+.form-group textarea { height:90px; resize:none; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(255,45,45,.1); }
+.form-error { font-size:.75rem; color:var(--accent); font-weight:700; margin-top:.3rem; display:none; }
+.form-error.show { display:block; }
+.modal-divider { display:flex; align-items:center; gap:1rem; margin:1rem 0; }
+.modal-divider::before, .modal-divider::after { content:''; flex:1; height:1px; background:rgba(255,255,255,.07); }
+.modal-divider span { font-size:.7rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+.forgot-link { font-size:.75rem; font-weight:700; color:var(--muted); text-align:right; cursor:pointer; background:none; border:none; text-decoration:underline; margin-top:.4rem; transition:color .2s; }
+.forgot-link:hover { color:var(--accent); }
+.modal-success { text-align:center; padding:1.5rem; display:flex; flex-direction:column; align-items:center; gap:.8rem; animation:fadeUp .5s both; }
+.modal-success p { font-size:.92rem; font-weight:700; color:var(--text); }
+.modal-terms { font-size:.68rem; color:var(--muted); text-align:center; margin-top:1.2rem; font-weight:400; line-height:1.5; }
+
+/* Profile edit modal */
+#profileEditModal .modal-box { max-width:480px; }
+
+/* ══════════════════════════════
+   FOOTER
+══════════════════════════════ */
+footer { position:relative; z-index:1; border-top:1px solid var(--border); padding:2rem 4rem; display:flex; align-items:center; justify-content:space-between; background:var(--surface); }
+.footer-logo { font-family:'Bebas Neue',sans-serif; font-size:1.3rem; letter-spacing:.12em; color:var(--text); }
+.footer-logo span { color:var(--accent); }
+.footer-copy { font-size:.72rem; color:var(--muted); }
+.footer-links { display:flex; gap:1.6rem; }
+.footer-links a { font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); text-decoration:none; transition:color .2s; cursor:pointer; }
+.footer-links a:hover { color:var(--accent); }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width:4px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:#2a2a3a; border-radius:2px; }
+
+/* ══════════════════════════════
+   MANDATORY LOGIN OVERLAY
+══════════════════════════════ */
+#loginOverlay {
+  position:fixed; inset:0; z-index:90000;
+  background:#050508;
+  display:flex; align-items:flex-start; justify-content:center;
+  opacity:1; pointer-events:all;
+  transition:opacity .6s ease;
+  overflow-y:auto; overflow-x:hidden;
+  padding:1rem;
+  -webkit-overflow-scrolling:touch;
+}
+#loginOverlay.open { opacity:1; pointer-events:all; }
+#loginOverlay.hidden { opacity:0; pointer-events:none; }
+.auth-card {
+  background:var(--surface);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:24px;
+  padding:3rem 2.6rem;
+  width:100%; max-width:460px;
+  position:relative;
+  box-shadow:0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(255,45,45,.08);
+  animation:authCardIn .7s cubic-bezier(.16,1,.3,1) both;
+  margin:auto;
+}
+@keyframes authCardIn { from{opacity:0;transform:translateY(30px) scale(.96)} to{opacity:1;transform:translateY(0) scale(1)} }
+.auth-card-bg {
+  position:absolute; inset:0; border-radius:24px; overflow:hidden; pointer-events:none;
+}
+.auth-card-bg::before {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(ellipse 80% 60% at 50% -10%, rgba(255,45,45,.07), transparent 60%);
+}
+.auth-logo {
+  font-family:'Bebas Neue',sans-serif; font-size:1.8rem; letter-spacing:.14em;
+  text-align:center; margin-bottom:.3rem; color:var(--text);
+}
+.auth-logo span { color:var(--accent); }
+.auth-welcome {
+  text-align:center; font-size:.8rem; color:var(--muted); font-weight:400;
+  margin-bottom:2rem; line-height:1.6;
+}
+.auth-tabs {
+  display:flex; gap:.5rem; margin-bottom:1.6rem;
+  background:rgba(255,255,255,.04); border-radius:100px; padding:.3rem;
+}
+.auth-tab {
+  flex:1; padding:.55rem; border-radius:100px; border:none;
+  background:transparent; color:var(--muted);
+  font-family:'Barlow',sans-serif; font-size:.78rem; font-weight:800;
+  letter-spacing:.1em; text-transform:uppercase; cursor:pointer;
+  transition:all .25s cubic-bezier(.16,1,.3,1);
+}
+.auth-tab.active { background:var(--accent); color:#fff; box-shadow:0 4px 16px rgba(255,45,45,.3); }
+.auth-form { display:none; }
+.auth-form.active { display:block; animation:formIn .35s cubic-bezier(.16,1,.3,1) both; }
+@keyframes formIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.auth-row { display:grid; grid-template-columns:1fr 1fr; gap:.7rem; }
+.auth-input-group {
+  display:flex; flex-direction:column; gap:.3rem; margin-bottom:.75rem;
+}
+.auth-input-group label {
+  font-size:.62rem; font-weight:800; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--muted);
+}
+.auth-input-group input {
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+  border-radius:12px; padding:.78rem 1rem; color:var(--text);
+  font-family:'Barlow',sans-serif; font-weight:700; font-size:.85rem;
+  outline:none; transition:border-color .2s, box-shadow .2s; width:100%;
+}
+.auth-input-group input:focus {
+  border-color:var(--accent); box-shadow:0 0 0 3px rgba(255,45,45,.1);
+}
+.auth-input-group input::placeholder { color:var(--muted); font-weight:500; }
+.auth-error {
+  font-size:.75rem; color:var(--accent); font-weight:700;
+  margin-bottom:.6rem; padding:.55rem .8rem;
+  background:rgba(255,45,45,.08); border:1px solid rgba(255,45,45,.2);
+  border-radius:8px; display:none;
+}
+.auth-error.show { display:block; animation:formIn .25s both; }
+.auth-btn {
+  width:100%; padding:.88rem; border-radius:100px; border:none;
+  background:var(--accent); color:#fff;
+  font-family:'Barlow',sans-serif; font-size:.85rem; font-weight:900;
+  letter-spacing:.1em; text-transform:uppercase; cursor:pointer;
+  transition:all .25s cubic-bezier(.16,1,.3,1);
+  box-shadow:0 4px 20px rgba(255,45,45,.25);
+  position:relative; overflow:hidden; margin-top:.3rem;
+}
+.auth-btn::before {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(120deg,transparent,rgba(255,255,255,.2),transparent);
+  transform:translateX(-100%); transition:transform .5s; border-radius:100px;
+}
+.auth-btn:hover::before { transform:translateX(100%); }
+.auth-btn:hover { transform:translateY(-2px); box-shadow:0 8px 28px rgba(255,45,45,.45); }
+.auth-btn:active { transform:scale(.97); transition:transform .1s; }
+.auth-btn:disabled { opacity:.6; pointer-events:none; }
+.auth-forgot {
+  font-size:.73rem; font-weight:700; color:var(--muted);
+  background:none; border:none; cursor:pointer;
+  text-decoration:underline; margin:.5rem 0 0; display:block;
+  text-align:right; transition:color .2s;
+}
+.auth-forgot:hover { color:var(--accent); }
+.auth-terms {
+  font-size:.65rem; color:var(--muted); text-align:center;
+  margin-top:1.2rem; line-height:1.5; font-weight:400;
+}
+.auth-success {
+  display:none; flex-direction:column; align-items:center;
+  gap:.8rem; text-align:center; padding:1rem 0;
+  animation:formIn .5s both;
+}
+.auth-success.show { display:flex; }
+.auth-success-icon {
+  width:60px; height:60px; border-radius:50%;
+  background:rgba(34,197,94,.12); border:2px solid rgba(34,197,94,.3);
+  display:flex; align-items:center; justify-content:center;
+  animation:successPop .5s cubic-bezier(.16,1,.3,1) both;
+}
+@keyframes successPop { from{transform:scale(0)} to{transform:scale(1)} }
+.auth-success p { font-size:.95rem; font-weight:800; color:var(--text); }
+.auth-success small { font-size:.78rem; color:var(--muted); font-weight:400; }
+
+/* Role badge */
+.role-badge {
+  display:inline-flex; align-items:center; gap:.35rem;
+  font-size:.65rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase;
+  padding:.3rem .8rem; border-radius:100px; margin-top:.4rem;
+}
+.role-badge.cliente { background:rgba(107,104,120,.15); border:1px solid rgba(107,104,120,.3); color:var(--muted); }
+.role-badge.admin { background:rgba(255,45,45,.12); border:1px solid rgba(255,45,45,.3); color:var(--accent); }
+
+/* Nav role indicator */
+.nav-role { font-size:.6rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; padding:.2rem .5rem; border-radius:100px; }
+.nav-role.admin { background:rgba(255,45,45,.15); color:var(--accent); border:1px solid rgba(255,45,45,.25); }
+.nav-role.cliente { background:rgba(255,255,255,.06); color:var(--muted); border:1px solid rgba(255,255,255,.1); }
+
+/* REVEAL ANIMATION */
+.reveal { opacity:0; transform:translateY(30px); transition:opacity .6s ease, transform .6s ease; will-change:transform,opacity; }
+.reveal.visible { opacity:1; transform:translateY(0); }
+
+/* RESPONSIVE */
+@media(max-width:900px){
+  nav { padding:1rem 1.2rem; }
+  .nav-links { display:none; }
+  #navHamburger { display:flex; }
+  #work,#services,#contact,#download-banner,footer { padding:4rem 1.2rem; }
+  #profile { padding:4rem 1.2rem; }
+  .services-grid { grid-template-columns:1fr 1fr; }
+  .p-card.large,.p-card.medium,.p-card.small { grid-column:span 12; aspect-ratio:4/3; }
+  footer { flex-direction:column; gap:1rem; text-align:center; }
+  .profile-inner { grid-template-columns:1fr; justify-items:center; text-align:center; }
+  .profile-fields { grid-template-columns:1fr; }
+  .section-header { flex-direction:column; align-items:flex-start; gap:1rem; }
+  .hero-title { font-size:clamp(3.5rem,20vw,10rem); }
+  .hero-actions { flex-direction:column; align-items:center; }
+  .contact-cards { flex-direction:column; align-items:stretch; }
+  .contact-card { justify-content:flex-start; }
+  .auth-row { grid-template-columns:1fr; }
+  .auth-card { padding:2rem 1.4rem; }
+  .modal-box { padding:2rem 1.4rem; }
+}
+@media(max-width:480px){
+  #work,#services,#contact,#download-banner,footer { padding:3rem 1rem; }
+  #profile { padding:3rem 1rem; }
+  .services-grid { grid-template-columns:1fr; }
+  .filter-tabs { gap:.4rem; }
+  .tab-btn { font-size:.75rem; padding:.45rem 1rem; }
+  nav { padding:.9rem 1rem; }
+  .nav-controls .toggle-pill { display:none; }
+}
+
+/* ══════════════════════════════════════════════════
+   ADMIN DRAWER — pestaña lateral deslizante
+══════════════════════════════════════════════════ */
+#adminDrawer {
+  position: fixed;
+  top: 0; right: -820px;
+  width: min(820px, 100vw);
+  height: 100vh;
+  background: #050508;
+  border-left: 1px solid rgba(255,45,45,.18);
+  z-index: 8000;
+  display: flex;
+  flex-direction: row;
+  transition: right .45s cubic-bezier(.16,1,.3,1);
+  box-shadow: -20px 0 60px rgba(0,0,0,.7);
+}
+#adminDrawer.open { right: 0; }
+#adminDrawerOverlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(4px);
+  z-index: 7999;
+  opacity: 0; pointer-events: none;
+  transition: opacity .35s;
+}
+#adminDrawerOverlay.show { opacity: 1; pointer-events: all; }
+#adminOpenBtn {
+  position: fixed;
+  bottom: 2rem; right: 2rem;
+  z-index: 7000;
+  display: none;
+  background: #ff2d2d;
+  color: #fff;
+  border: none;
+  border-radius: 100px;
+  padding: .75rem 1.4rem;
+  font-family: 'Barlow', sans-serif;
+  font-size: .8rem;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 4px 24px rgba(255,45,45,.4);
+  transition: transform .2s, box-shadow .2s;
+  gap: .5rem;
+  align-items: center;
+}
+#adminOpenBtn:hover { transform: translateY(-3px) scale(1.04); box-shadow: 0 10px 30px rgba(255,45,45,.5); }
+#adminOpenBtn svg { width: 15px; height: 15px; }
+.adw-sidebar {
+  width: 200px; background: #0d0d14;
+  border-right: 1px solid rgba(255,255,255,.07);
+  display: flex; flex-direction: column;
+  padding: 1.5rem 1rem; gap: .3rem; flex-shrink: 0;
+}
+.adw-logo { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: .12em; color: #f0eee8; margin-bottom: 1.2rem; padding-left: .4rem; }
+.adw-logo span { color: #ff2d2d; }
+.adw-nav-item { display: flex; align-items: center; gap: .6rem; padding: .6rem .9rem; border-radius: 10px; font-size: .76rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6b6878; cursor: pointer; transition: all .2s; }
+.adw-nav-item:hover { background: rgba(255,255,255,.05); color: #f0eee8; }
+.adw-nav-item.active { background: rgba(255,45,45,.12); color: #ff2d2d; border: 1px solid rgba(255,45,45,.2); }
+.adw-nav-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+.adw-bottom { margin-top: auto; padding-top: .8rem; border-top: 1px solid rgba(255,255,255,.07); }
+.adw-user { display: flex; align-items: center; gap: .5rem; padding: .4rem; margin-bottom: .6rem; }
+.adw-avatar { width: 30px; height: 30px; border-radius: 50%; background: #ff2d2d; display: flex; align-items: center; justify-content: center; font-size: .75rem; font-weight: 900; color: #fff; flex-shrink: 0; }
+.adw-close-btn { position: absolute; top: 1rem; left: -44px; width: 36px; height: 36px; background: #0d0d14; border: 1px solid rgba(255,255,255,.1); border-right: none; border-radius: 8px 0 0 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #6b6878; font-size: 1rem; transition: all .2s; }
+.adw-close-btn:hover { background: #ff2d2d; color: #fff; }
+.adw-main { flex: 1; padding: 1.5rem; overflow-y: auto; min-width: 0; }
+.adw-section { display: none; }
+.adw-section.active { display: block; }
+.adw-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: .7rem; margin-bottom: 1.5rem; }
+.adw-stat { background: #0d0d14; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; padding: 1rem; text-align: center; }
+.adw-stat-num { font-family: 'Bebas Neue', sans-serif; font-size: 2.2rem; line-height: 1; color: #ff2d2d; }
+.adw-stat-lbl { font-size: .65rem; letter-spacing: .14em; text-transform: uppercase; color: #6b6878; margin-top: .3rem; }
+.adw-table-wrap { background: #0d0d14; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; overflow: hidden; margin-bottom: 1.5rem; overflow-x: auto; }
+.adw-table-hdr { display: flex; align-items: center; justify-content: space-between; padding: .9rem 1.2rem; border-bottom: 1px solid rgba(255,255,255,.07); }
+.adw-table-ttl { font-size: .78rem; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
+.adw-table-wrap table { width: 100%; border-collapse: collapse; min-width: 400px; }
+.adw-table-wrap th { font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: #6b6878; padding: .65rem 1rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,.07); }
+.adw-table-wrap td { font-size: .78rem; padding: .65rem 1rem; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: middle; color: #f0eee8; }
+.adw-table-wrap tr:last-child td { border-bottom: none; }
+.adw-table-wrap tr:hover td { background: rgba(255,255,255,.02); }
+.adw-badge-p { display:inline-block;padding:.15rem .6rem;border-radius:100px;font-size:.62rem;font-weight:800;letter-spacing:.1em;background:rgba(255,200,0,.12);color:#ffc800;border:1px solid rgba(255,200,0,.25); }
+.adw-badge-d { display:inline-block;padding:.15rem .6rem;border-radius:100px;font-size:.62rem;font-weight:800;letter-spacing:.1em;background:rgba(0,200,100,.12);color:#00c864;border:1px solid rgba(0,200,100,.25); }
+.adw-btn { display:inline-flex;align-items:center;justify-content:center;font-family:'Barlow',sans-serif;font-size:.72rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase;padding:.35rem .8rem;border-radius:100px;border:none;cursor:pointer;transition:all .2s; }
+.adw-btn-red { background:#ff2d2d;color:#fff; }
+.adw-btn-outline { background:transparent;color:#f0eee8;border:1.5px solid rgba(255,255,255,.12); }
+.adw-btn-outline:hover { border-color:#ff2d2d; }
+.adw-btn-danger { background:#1a0a0a;color:#ff2d2d;border:1px solid rgba(255,45,45,.3); }
+.adw-btn-danger:hover { background:rgba(255,45,45,.15); }
+.adw-cal-controls { display:flex;align-items:center;gap:.8rem;margin-bottom:1rem; }
+.adw-cal-month { font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:.06em;color:#f0eee8; }
+.adw-cal-grid { display:grid;grid-template-columns:repeat(7,1fr);gap:.3rem;margin-bottom:1.2rem; }
+.adw-cal-hdr { font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:#6b6878;text-align:center;padding:.3rem 0; }
+.adw-cal-day { background:#0d0d14;border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:.5rem .3rem;text-align:center;cursor:pointer;transition:all .2s;min-height:48px;position:relative; }
+.adw-cal-day:hover { border-color:rgba(255,255,255,.2); }
+.adw-cal-day.occ { background:rgba(255,45,45,.1);border-color:rgba(255,45,45,.3); }
+.adw-cal-day.occ .adw-cal-num { color:#ff2d2d; }
+.adw-cal-day.tod { border-color:#ff2d2d;box-shadow:0 0 10px rgba(255,45,45,.2); }
+.adw-cal-day.other { opacity:.3; }
+.adw-cal-num { font-size:.8rem;font-weight:900;color:#f0eee8; }
+.adw-cal-dot { position:absolute;bottom:.3rem;left:50%;transform:translateX(-50%);width:4px;height:4px;background:#ff2d2d;border-radius:50%; }
+.adw-form { background:#0d0d14;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:1rem;margin-bottom:1.2rem; }
+.adw-form label { font-size:.62rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#6b6878;display:block;margin-bottom:.3rem; }
+.adw-input { background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:.6rem .9rem;color:#f0eee8;font-family:'Barlow',sans-serif;font-weight:700;font-size:.82rem;outline:none;width:100%;transition:border-color .2s;margin-bottom:.6rem; }
+.adw-input:focus { border-color:#ff2d2d; }
+.adw-row { display:grid;grid-template-columns:1fr 1fr;gap:.7rem; }
+.adw-page-title { font-family:'Bebas Neue',sans-serif;font-size:1.8rem;letter-spacing:.05em;color:#f0eee8;margin-bottom:1.2rem; }
+#adwEventModal { position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:9000;opacity:0;pointer-events:none;transition:opacity .3s; }
+#adwEventModal.open { opacity:1;pointer-events:all; }
+.adw-modal-card { background:#0d0d14;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:1.8rem;width:90%;max-width:380px;position:relative; }
+.adw-modal-close { position:absolute;top:.8rem;right:.8rem;width:28px;height:28px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.07);border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b6878;font-size:.8rem; }
+.adw-modal-close:hover { background:#ff2d2d;color:#fff; }
+.adw-modal-title { font-weight:900;font-size:1rem;margin-bottom:1rem;color:#f0eee8; }
+.adw-modal-actions { display:flex;gap:.6rem;margin-top:1rem; }
+@media(max-width:600px){
+  #adminDrawer { width: 100vw; }
+  .adw-sidebar { width: 54px; padding: 1rem .4rem; }
+  .adw-logo, .adw-nav-item span, .adw-user .adw-info { display: none; }
+  .adw-nav-item { justify-content: center; }
+  .adw-stats { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- CURSOR -->
+
+<canvas id="stars-canvas"></canvas>
+
+<!-- ══════════════════════════════════════
+     MANDATORY LOGIN OVERLAY
+     Shown on page load, hides after auth
+══════════════════════════════════════ -->
+<div id="loginOverlay" class="open">
+  <!-- Stars canvas for background atmosphere -->
+  <canvas id="auth-stars" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
+
+  <div class="auth-card" style="position:relative;z-index:1;">
+    <div class="auth-card-bg"></div>
+
+    <div class="auth-logo">Creative<span>Lab</span></div>
+    <p class="auth-welcome" id="authWelcomeMsg">Inicia sesión o crea tu cuenta para continuar</p>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="authTabLogin" onclick="switchTab('login')">Iniciar Sesión</button>
+      <button class="auth-tab" id="authTabRegister" onclick="switchTab('register')">Registrarse</button>
+    </div>
+
+    <!-- ── LOGIN FORM ── -->
+    <div class="auth-form active" id="authLoginForm">
+      <div class="auth-input-group">
+        <label>Correo Electrónico</label>
+        <input type="email" id="ovEmail" placeholder="tucorreo@gmail.com" autocomplete="email"/>
+      </div>
+      <div class="auth-input-group">
+        <label>Contraseña</label>
+        <input type="password" id="ovPass" placeholder="••••••••" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter')overlayLogin()"/>
+      </div>
+      <button class="auth-forgot" onclick="switchTab('forgot')">¿Olvidaste tu contraseña?</button>
+      <div class="auth-error" id="ovLoginError"></div>
+      <button class="auth-btn" id="ovLoginBtn" onclick="overlayLogin()">Iniciar Sesión</button>
+    </div>
+
+    <!-- ── REGISTER FORM ── -->
+    <div class="auth-form" id="authRegisterForm">
+      <div class="auth-row">
+        <div class="auth-input-group">
+          <label>Nombre</label>
+          <input type="text" id="ovNombre" placeholder="Juan" autocomplete="given-name"/>
+        </div>
+        <div class="auth-input-group">
+          <label>Apellido</label>
+          <input type="text" id="ovApellido" placeholder="Pérez" autocomplete="family-name"/>
+        </div>
+      </div>
+      <div class="auth-input-group">
+        <label>Correo Electrónico (Gmail)</label>
+        <input type="email" id="ovRegEmail" placeholder="tucorreo@gmail.com" autocomplete="email"/>
+      </div>
+      <div class="auth-row">
+        <div class="auth-input-group">
+          <label>Teléfono</label>
+          <input type="tel" id="ovTelefono" placeholder="849 000 0000" autocomplete="tel"/>
+        </div>
+        <div class="auth-input-group">
+          <label>Fecha de Nacimiento</label>
+          <input type="date" id="ovFechaNac" autocomplete="bday"/>
+        </div>
+      </div>
+      <div class="auth-input-group">
+        <label>Contraseña</label>
+        <input type="password" id="ovRegPass" placeholder="Mínimo 6 caracteres" autocomplete="new-password"/>
+      </div>
+      <div class="auth-error" id="ovRegError"></div>
+      <button class="auth-btn" id="ovRegBtn" onclick="overlayRegister()">Crear Cuenta</button>
+    </div>
+
+    <!-- ── FORGOT PASSWORD FORM ── -->
+    <div class="auth-form" id="authForgotForm">
+      <p style="font-size:.85rem;color:var(--muted);font-weight:400;margin-bottom:1.2rem;line-height:1.6;">
+        Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.
+      </p>
+      <div class="auth-input-group">
+        <label>Correo Electrónico</label>
+        <input type="email" id="ovForgotEmail" placeholder="tucorreo@gmail.com"/>
+      </div>
+      <div class="auth-error" id="ovForgotError"></div>
+      <button class="auth-btn" onclick="overlayForgot()">Enviar Enlace</button>
+      <button class="auth-forgot" onclick="switchTab('login')" style="text-align:center;display:block;margin-top:.6rem;">← Volver a Iniciar Sesión</button>
+    </div>
+
+    <!-- ── SUCCESS STATE ── -->
+    <div class="auth-success" id="authSuccessState">
+      <div class="auth-success-icon">
+        <svg width="28" height="28" fill="none" stroke="#22c55e" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <p id="authSuccessText">¡Listo!</p>
+      <small id="authSuccessSubtext">Redirigiendo...</small>
+    </div>
+
+    <p class="auth-terms">🔒 Las contraseñas se almacenan con encriptación. Tu información es privada y segura.</p>
+  </div>
+</div>
+
+<!-- MOBILE MENU -->
+<div id="mobileMenu">
+  <a href="#work" onclick="closeMobileMenu()" data-en="Work" data-es="Trabajos">Work</a>
+  <a href="#services" onclick="closeMobileMenu()" data-en="Services" data-es="Servicios">Services</a>
+  <a href="#contact" onclick="closeMobileMenu()" data-en="Contact" data-es="Contacto">Contact</a>
+  <a href="#profile" onclick="closeMobileMenu()" data-en="Profile" data-es="Perfil">Profile</a>
+</div>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">Creative<span>Lab</span></a>
+  <ul class="nav-links">
+    <li><a href="#work" data-en="Work" data-es="Trabajos">Work</a></li>
+    <li><a href="#services" data-en="Services" data-es="Servicios">Services</a></li>
+    <li><a href="#contact" data-en="Contact" data-es="Contacto">Contact</a></li>
+  </ul>
+  <div class="nav-controls">
+    <!-- Theme toggle -->
+    <button class="toggle-pill" onclick="toggleTheme()" title="Dark/Light mode">
+      <span class="t-icon t-moon">🌙</span>
+      <span class="t-icon t-sun">☀️</span>
+    </button>
+    <!-- Lang toggle -->
+    <button class="toggle-pill" onclick="toggleLang()">
+      <span class="lang-opt" id="langES">ES</span>
+      <span class="lang-sep">|</span>
+      <span class="lang-opt active" id="langEN">EN</span>
+    </button>
+    <!-- Admin panel button (only visible if admin) -->
+    <a href="admin.html" class="nav-cta btn-sm" id="adminPanelBtn" style="display:none;" data-en="Admin Panel" data-es="Admin Panel">Admin Panel</a>
+    <!-- User area (shown when logged in) -->
+    <div id="navUserArea">
+      <button class="toggle-pill" onclick="openProfileEdit()" style="gap:.5rem;">
+        <div class="nav-avatar" id="navAvatarLetter">U</div>
+        <span id="navUserName" style="font-size:.75rem;font-weight:800;color:var(--text);">User</span>
+        <span class="nav-role cliente" id="navRoleBadge">Cliente</span>
+      </button>
+      <button class="nav-cta btn-sm" onclick="doLogout()" data-en="Logout" data-es="Salir">Logout</button>
+    </div>
+    <!-- Login button (shown when logged out) -->
+    <button class="nav-cta" id="navLoginBtn" onclick="openModal('authModal')" data-en="Hire Me" data-es="Contráctame">Hire Me</button>
+    <!-- Hamburger (mobile only) -->
+    <button id="navHamburger" onclick="toggleMobileMenu()" aria-label="Menú">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="hero-noise"></div>
+  <div class="hero-grid"></div>
+  <div class="hero-rings">
+    <div class="hero-ring"></div><div class="hero-ring"></div>
+    <div class="hero-ring"></div><div class="hero-ring"></div>
+  </div>
+  <div class="hero-glow"></div>
+  <div class="hero-badge" data-en="Available for Projects 2026" data-es="Disponible para Proyectos 2026">Available for Projects 2026</div>
+  <h1 class="hero-title"><span class="line1">Creative<span class="line2-inline">Lab</span></span></h1>
+  <p class="hero-tagline" data-en="Designs that <em>capture attention</em> and elevate brands — from logos to full visual identities." data-es="Diseños que <em>capturan la atención</em> y elevan marcas — desde logos hasta identidades visuales completas.">Designs that <em>capture attention</em> and elevate brands — from logos to full visual identities.</p>
+  <div class="hero-actions">
+
+    <a href="#contact" class="btn btn-outline" data-en="Contáctame" data-es="Contáctame">Contáctame</a>
+  </div>
+</section>
+
+<!-- PROFILE -->
+<section id="profile">
+  <div class="profile-inner">
+    <div>
+      <div class="profile-photo-ring" id="photoRing">
+        <div class="profile-photo-placeholder" id="photoPlaceholder" onclick="document.getElementById('photoInput').click()">
+          <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span data-en="Upload Photo" data-es="Subir Foto">Upload Photo</span>
+        </div>
+        <img id="profileImg" class="profile-photo" src="" alt="" style="display:none;"/>
+      </div>
+      <input type="file" id="photoInput" accept="image/*" onchange="loadPhoto(event)"/>
+    </div>
+    <div class="profile-info">
+      <div>
+        <div class="profile-badge-pill" data-en="Graphic Designer & Filmmaker" data-es="Diseñador Gráfico & Filmmaker">Graphic Designer & Filmmaker</div>
+        <h2 class="profile-name">Creative<span>Lab</span></h2>
+      </div>
+      <div class="profile-fields">
+        <div class="profile-field"><div class="profile-field-label" data-en="Full Name" data-es="Nombre Completo">Full Name</div><div class="profile-field-value" data-en="Josué · CreativeLab" data-es="Josué · CreativeLab">Josué · CreativeLab</div></div>
+        <div class="profile-field"><div class="profile-field-label" data-en="Specialty" data-es="Especialidad">Specialty</div><div class="profile-field-value" data-en="Design · Film · Photo · Video" data-es="Diseño · Film · Foto · Video">Design · Film · Photo · Video</div></div>
+        <div class="profile-field"><div class="profile-field-label">Gmail</div><div class="profile-field-value accent"><a href="/cdn-cgi/l/email-protection#6a29180f0b1e031c0f060b0852585e2a0d070b030644090507" style="color:inherit;text-decoration:none;"><span class="__cf_email__" data-cfemail="1457667175607d62717875762c2620547379757d783a777b79">[email&#160;protected]</span></a></div></div>
+        <div class="profile-field"><div class="profile-field-label" data-en="Phone" data-es="Teléfono">Phone</div><div class="profile-field-value accent"><a href="tel:8494547811" style="color:inherit;text-decoration:none;">849 454 7811</a></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MARQUEE -->
+<div class="marquee-section">
+  <div class="marquee-track">
+    <div class="marquee-item"><span class="dot"></span><span data-en="Logo Design" data-es="Diseño de Logos">Logo Design</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Flyer Design" data-es="Diseño de Flyers">Flyer Design</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Brand Identity" data-es="Identidad de Marca">Brand Identity</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="YouTube Thumbnails" data-es="Miniaturas YouTube">YouTube Thumbnails</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Social Media" data-es="Redes Sociales">Social Media</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Filmmaker" data-es="Filmmaker">Filmmaker</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Video Editing" data-es="Edición de Video">Video Editing</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Photography" data-es="Fotografía">Photography</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Logo Design" data-es="Diseño de Logos">Logo Design</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Flyer Design" data-es="Diseño de Flyers">Flyer Design</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Brand Identity" data-es="Identidad de Marca">Brand Identity</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="YouTube Thumbnails" data-es="Miniaturas YouTube">YouTube Thumbnails</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Filmmaker" data-es="Filmmaker">Filmmaker</span></div>
+    <div class="marquee-item"><span class="dot"></span><span data-en="Photography" data-es="Fotografía">Photography</span></div>
+  </div>
+</div>
+
+<!-- CTA -->
+<section id="contact">
+  <div class="cta-glow"></div>
+  <div class="section-label" style="justify-content:center;margin-bottom:1.5rem;" data-en="Let's Work Together" data-es="Trabajemos Juntos">Let's Work Together</div>
+  <h2 class="cta-title" data-en="Ready to<br><span class='accent'>Elevate</span><br>Your Brand?" data-es="¿Listo para<br><span class='accent'>Elevar</span><br>tu Marca?">Ready to<br><span class="accent">Elevate</span><br>Your Brand?</h2>
+  <p class="cta-sub" data-en="Every great brand starts with a conversation. Let's create something remarkable." data-es="Toda gran marca comienza con una conversación. Creemos algo extraordinario.">Every great brand starts with a conversation. Let's create something remarkable.</p>
+  <div class="contact-cards">
+    <a href="tel:8494547811" class="contact-card"><div class="contact-card-icon"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81a19.79 19.79 0 01-3.07-8.68A2 2 0 012 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 8.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></div><div><div class="contact-card-label" data-en="Phone" data-es="Teléfono">Phone</div><div class="contact-card-value">849 454 7811</div></div></a>
+    <a href="/cdn-cgi/l/email-protection#baf9c8dfdbced3ccdfd6dbd882888efaddd7dbd3d694d9d5d7" class="contact-card"><div class="contact-card-icon"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg></div><div><div class="contact-card-label" data-en="Email" data-es="Correo">Email</div><div class="contact-card-value"><span class="__cf_email__" data-cfemail="195a6b7c786d706f7c75787b212b2d597e74787075377a7674">[email&#160;protected]</span></div></div></a>
+  </div>
+  <div class="cta-actions">
+    <a href="josue.html" class="btn btn-red"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><span data-en="Create Your Design" data-es="Crea Tu Diseño">Crea Tu Diseño</span></a>
+    <a href="tel:8494547811" class="btn btn-outline" data-en="Call Now" data-es="Llamar Ahora">Call Now</a>
+  </div>
+</section>
+
+<!-- LIGHTBOX -->
+<div id="lightbox" onclick="closeLightbox()">
+  <div class="lightbox-close" onclick="closeLightbox()">✕</div>
+  <img id="lightboxImg" src="" alt=""/>
+</div>
+
+<!-- DOWNLOAD CV BANNER -->
+<section id="download-banner">
+  <div class="dl-glow"></div>
+  <div class="dl-inner">
+    <div class="section-label" style="justify-content:center;" data-en="Free Download" data-es="Descarga Gratuita">Free Download</div>
+    <h2 class="dl-title" data-en="Download My Portfolio & CV" data-es="Descarga Mi Portafolio y CV">Download My Portfolio & CV</h2>
+    <p class="dl-sub" data-en="Josué · Graphic Designer, Filmmaker, Photographer & Videographer · 6 years designing · 4 years professional experience." data-es="Josué · Diseñador Gráfico, Filmmaker, Fotógrafo y Videógrafo · 6 años diseñando · 4 años de experiencia profesional.">Josué · Graphic Designer, Filmmaker, Photographer & Videographer · 6 years designing · 4 years professional experience.</p>
+    <button class="dl-btn" onclick="downloadPDF()">
+      <span class="dl-icon"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></span>
+      <span data-en="Download CV (PDF)" data-es="Descargar CV (PDF)">Download CV (PDF)</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══ AUTH MODAL ══ -->
+<div class="modal-overlay" id="authModal" onclick="closeModalOutside(event,'authModal')">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('authModal')">✕</button>
+    <div class="modal-logo">Creative<span>Lab</span></div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" onclick="switchAuthTab('login')" id="tabLogin" data-en="Sign In" data-es="Iniciar Sesión">Sign In</button>
+      <button class="modal-tab" onclick="switchAuthTab('register')" id="tabRegister" data-en="Register" data-es="Registrarse">Register</button>
+    </div>
+
+    <!-- LOGIN FORM -->
+    <div id="loginForm">
+      <div class="form-group"><label data-en="Email" data-es="Correo">Email</label><input type="email" id="loginEmail" placeholder="you@email.com"/></div>
+      <div class="form-group"><label data-en="Password" data-es="Contraseña">Password</label><input type="password" id="loginPass" placeholder="••••••••"/></div>
+      <button class="forgot-link" onclick="showForgotForm()" data-en="Forgot your password?" data-es="¿Olvidaste tu contraseña?">Forgot your password?</button>
+      <div class="form-error" id="loginError"></div>
+      <button class="btn btn-red" style="width:100%;margin-top:1rem;" onclick="doLogin()" data-en="Sign In" data-es="Iniciar Sesión">Sign In</button>
+    </div>
+
+    <!-- REGISTER FORM -->
+    <div id="registerForm" style="display:none;">
+      <div class="form-group"><label data-en="Full Name" data-es="Nombre Completo">Full Name</label><input type="text" id="regName" placeholder="John Doe"/></div>
+      <div class="form-group"><label data-en="Email" data-es="Correo">Email</label><input type="email" id="regEmail" placeholder="you@email.com"/></div>
+      <div class="form-group"><label data-en="Phone" data-es="Teléfono">Phone</label><input type="tel" id="regPhone" placeholder="849 000 0000"/></div>
+      <div class="form-group"><label data-en="Password" data-es="Contraseña">Password</label><input type="password" id="regPass" placeholder="Min. 6 characters"/></div>
+      <div class="form-error" id="registerError"></div>
+      <button class="btn btn-red" style="width:100%;margin-top:1rem;" onclick="doRegister()" data-en="Create Account" data-es="Crear Cuenta">Create Account</button>
+    </div>
+
+    <!-- FORGOT PASSWORD FORM -->
+    <div id="forgotForm" style="display:none;">
+      <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem;font-weight:400;" data-en="Enter your email and we'll send you a reset link." data-es="Ingresa tu correo y te enviaremos un enlace para restablecer.">Enter your email and we'll send you a reset link.</p>
+      <div class="form-group"><label data-en="Email" data-es="Correo">Email</label><input type="email" id="forgotEmail" placeholder="you@email.com"/></div>
+      <div class="form-error" id="forgotError"></div>
+      <button class="btn btn-red" style="width:100%;margin-top:1rem;" onclick="doForgotPassword()" data-en="Send Reset Link" data-es="Enviar Enlace">Send Reset Link</button>
+      <button class="forgot-link" onclick="showLoginForm()" style="margin-top:.5rem;" data-en="Back to Sign In" data-es="Volver a Iniciar Sesión">Back to Sign In</button>
+    </div>
+
+    <div id="authSuccess" class="modal-success" style="display:none;">
+      <svg width="44" height="44" fill="none" stroke="var(--accent)" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      <p id="authSuccessMsg">Done!</p>
+    </div>
+    <p class="modal-terms" data-en="Passwords are securely stored. Your info is only used to contact you." data-es="Las contraseñas se almacenan de forma segura. Tu info solo se usa para contactarte.">Passwords are securely stored. Your info is only used to contact you.</p>
+  </div>
+</div>
+
+<!-- ══ PROFILE EDIT MODAL ══ -->
+<div class="modal-overlay" id="profileEditModal" onclick="closeModalOutside(event,'profileEditModal')">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('profileEditModal')">✕</button>
+    <h3 class="modal-title" data-en="Edit Profile" data-es="Editar Perfil">Editar Perfil</h3>
+    <!-- Role display -->
+    <div style="text-align:center;margin-bottom:1.2rem;">
+      <span class="role-badge cliente" id="profileRoleBadge">Cliente</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem;">
+      <div class="form-group"><label data-en="First Name" data-es="Nombre">Nombre</label><input type="text" id="editName" placeholder="Juan"/></div>
+      <div class="form-group"><label data-en="Last Name" data-es="Apellido">Apellido</label><input type="text" id="editLastName" placeholder="Pérez"/></div>
+    </div>
+    <div class="form-group"><label data-en="Email" data-es="Correo">Correo</label><input type="email" id="editEmail" placeholder="you@email.com"/></div>
+    <div class="form-group"><label data-en="Phone" data-es="Teléfono">Teléfono</label><input type="tel" id="editPhone" placeholder="849 000 0000"/></div>
+    <div class="modal-divider"><span data-en="Change Password" data-es="Cambiar Contraseña">Cambiar Contraseña</span></div>
+    <div class="form-group"><label data-en="Current Password" data-es="Contraseña Actual">Contraseña Actual</label><input type="password" id="editCurrentPass" placeholder="••••••••"/></div>
+    <div class="form-group"><label data-en="New Password" data-es="Nueva Contraseña">Nueva Contraseña</label><input type="password" id="editNewPass" placeholder="Mín. 6 caracteres"/></div>
+    <div class="form-error" id="editError"></div>
+    <button class="btn btn-red" style="width:100%;margin-top:1rem;" onclick="saveProfileEdit()" data-en="Save Changes" data-es="Guardar Cambios">Guardar Cambios</button>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">Creative<span>Lab</span></div>
+  <div class="footer-copy" data-en="© 2026 CreativeLab · Josué. All rights reserved." data-es="© 2026 CreativeLab · Josué. Todos los derechos reservados.">© 2026 CreativeLab · Josué. All rights reserved.</div>
+  <div class="footer-links">
+    <a href="#" onclick="openModal('authModal');return false;" data-en="Hire Me" data-es="Contrátame">Hire Me</a>
+    <a href="josue.html" data-en="Create Design" data-es="Crea Diseño">Create Design</a>
+    <a href="admin.html" id="footerAdminLink" style="display:none;" data-en="Admin" data-es="Admin">Admin</a>
+  </div>
+</footer>
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+/* ══════════════════════════════
+   HAMBURGER MENU (mobile)
+══════════════════════════════ */
+function toggleMobileMenu() {
+  const menu = document.getElementById('mobileMenu');
+  const btn  = document.getElementById('navHamburger');
+  const open = menu.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  document.body.style.overflow = open ? 'hidden' : '';
+}
+function closeMobileMenu() {
+  document.getElementById('mobileMenu').classList.remove('open');
+  document.getElementById('navHamburger').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+
+
+/* ══════════════════════════════
+   STARS + SHOOTING STARS
+══════════════════════════════ */
+const canvas=document.getElementById('stars-canvas'), ctx=canvas.getContext('2d');
+let stars=[], shoots=[];
+function resizeStar(){ canvas.width=innerWidth; canvas.height=innerHeight; }
+resizeStar(); window.addEventListener('resize',()=>{ resizeStar(); initStars(); });
+function initStars(){
+  stars=[];
+  for(let i=0;i<Math.floor(innerWidth*innerHeight/2800);i++)
+    stars.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,ph:Math.random()*Math.PI*2,sp:Math.random()*.004+.001,mn:Math.random()*.08+.02,mx:Math.random()*.35+.1});
+}
+initStars();
+function spawnShoot(){
+  const a=Math.PI/4+(Math.random()-.5)*.35, sp=20+Math.random()*12;
+  shoots.push({x:Math.random()*canvas.width*.75,y:Math.random()*canvas.height*.45,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,tl:140+Math.random()*80,al:0,ph:'in',life:0,max:50+Math.floor(Math.random()*20)});
+}
+function drawShoots(){
+  for(let i=shoots.length-1;i>=0;i--){
+    const s=shoots[i]; s.life++;
+    if(s.ph==='in'){s.al=Math.min(1,s.al+.08);if(s.al>=1)s.ph='go';}
+    else if(s.ph==='go'){if(s.life>=s.max)s.ph='out';}
+    else{s.al-=.06;if(s.al<=0){shoots.splice(i,1);continue;}}
+    s.x+=s.vx; s.y+=s.vy;
+    const steps=s.tl/Math.hypot(s.vx,s.vy), tx=s.x-s.vx*steps, ty=s.y-s.vy*steps;
+    const g=ctx.createLinearGradient(tx,ty,s.x,s.y);
+    g.addColorStop(0,'rgba(255,255,255,0)');g.addColorStop(.5,`rgba(255,230,230,${s.al*.25})`);g.addColorStop(1,`rgba(255,255,255,${s.al})`);
+    ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(s.x,s.y);ctx.strokeStyle=g;ctx.lineWidth=1.8;ctx.lineCap='round';ctx.stroke();
+    ctx.beginPath();ctx.arc(s.x,s.y,2,0,Math.PI*2);ctx.fillStyle=`rgba(255,255,255,${s.al})`;ctx.fill();
+  }
+}
+(function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  stars.forEach(s=>{s.ph+=s.sp;const t=Math.sin(s.ph)*.5+.5;const a=s.mn+t*(s.mx-s.mn);ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fillStyle=`rgba(255,255,255,${a})`;ctx.fill();});
+  drawShoots();
+  requestAnimationFrame(loop);
+})();
+setTimeout(function fire(){ spawnShoot(); setTimeout(fire,9000+Math.random()*2000); },1500);
+
+/* ══════════════════════════════
+   THEME & LANGUAGE
+══════════════════════════════ */
+function toggleTheme(){ document.body.classList.toggle('light-mode'); }
+
+let lang='en';
+function toggleLang(){
+  lang = lang==='en'?'es':'en';
+  document.getElementById('langEN').classList.toggle('active',lang==='en');
+  document.getElementById('langES').classList.toggle('active',lang==='es');
+  document.querySelectorAll('[data-en][data-es]').forEach(el=>{
+    const v=el.getAttribute('data-'+lang); if(!v)return;
+    if(v.includes('<')){el.innerHTML=v;return;}
+    const svg=el.querySelector('svg');
+    if(svg){for(let i=el.childNodes.length-1;i>=0;i--){const n=el.childNodes[i];if(n.nodeType===3&&n.textContent.trim()!==''){n.textContent=' '+v;break;}}return;}
+    el.textContent=v;
+  });
+}
+
+/* ══════════════════════════════
+   FILTER TABS
+══════════════════════════════ */
+document.querySelectorAll('.tab-btn').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tab-btn').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    const cat=tab.dataset.cat;
+    document.querySelectorAll('.p-card').forEach(c=>c.classList.toggle('hidden',cat!=='all'&&c.dataset.cat!==cat));
+  });
+});
+
+/* ══════════════════════════════
+   SCROLL REVEAL
+══════════════════════════════ */
+const revObs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('visible');}),{threshold:.1});
+document.querySelectorAll('.reveal').forEach(el=>revObs.observe(el));
+
+/* ══════════════════════════════
+   LIGHTBOX
+══════════════════════════════ */
+document.querySelectorAll('.p-card').forEach(card=>{
+  card.addEventListener('click',()=>{
+    const name=card.querySelector('.card-name')?.textContent||'CreativeLab';
+    document.getElementById('lightboxImg').src=`https://placehold.co/900x600/0d0d14/ff2d2d?text=${encodeURIComponent(name)}`;
+    document.getElementById('lightbox').classList.add('open');
+  });
+});
+function closeLightbox(){ document.getElementById('lightbox').classList.remove('open'); }
+
+/* ══════════════════════════════
+   MODAL HELPERS
+══════════════════════════════ */
+function openModal(id){ document.getElementById(id).classList.add('open'); document.body.style.overflow='hidden'; }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); document.body.style.overflow=''; }
+function closeModalOutside(e,id){ if(e.target===document.getElementById(id)) closeModal(id); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeLightbox(); document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); document.body.style.overflow=''; } });
+
+/* ══════════════════════════════
+   AUTH TABS
+══════════════════════════════ */
+function switchAuthTab(tab){
+  document.getElementById('loginForm').style.display   = tab==='login'?'block':'none';
+  document.getElementById('registerForm').style.display= tab==='register'?'block':'none';
+  document.getElementById('forgotForm').style.display  = 'none';
+  document.getElementById('authSuccess').style.display = 'none';
+  document.getElementById('tabLogin').classList.toggle('active',tab==='login');
+  document.getElementById('tabRegister').classList.toggle('active',tab==='register');
+}
+function showForgotForm(){ document.getElementById('loginForm').style.display='none'; document.getElementById('forgotForm').style.display='block'; }
+function showLoginForm(){ document.getElementById('forgotForm').style.display='none'; document.getElementById('loginForm').style.display='block'; }
+
+/* ══════════════════════════════
+   MANDATORY OVERLAY AUTH
+══════════════════════════════ */
+
+// ── Auth stars background for overlay ──
+(function(){
+  const c=document.getElementById('auth-stars');
+  if(!c)return;
+  const cx=c.getContext('2d');
+  function rs(){c.width=innerWidth;c.height=innerHeight;}
+  rs(); window.addEventListener('resize',rs);
+  let s=[];
+  for(let i=0;i<Math.floor(innerWidth*innerHeight/4000);i++)
+    s.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:Math.random()*1.1+.2,ph:Math.random()*Math.PI*2,sp:Math.random()*.003+.001,mn:.02,mx:.2});
+  (function loop(){
+    cx.clearRect(0,0,c.width,c.height);
+    s.forEach(st=>{st.ph+=st.sp;const t=Math.sin(st.ph)*.5+.5;const a=st.mn+t*(st.mx-st.mn);cx.beginPath();cx.arc(st.x,st.y,st.r,0,Math.PI*2);cx.fillStyle=`rgba(255,255,255,${a})`;cx.fill();});
+    requestAnimationFrame(loop);
+  })();
+})();
+
+function switchTab(tab) {
+  ['login','register','forgot'].forEach(t => {
+    const form = document.getElementById('authLoginForm'    .replace('login',t==='login'?'Login':t==='register'?'Register':'Forgot'));
+    // use explicit ids
+  });
+  document.getElementById('authLoginForm').classList.toggle('active', tab==='login');
+  document.getElementById('authRegisterForm').classList.toggle('active', tab==='register');
+  document.getElementById('authForgotForm').classList.toggle('active', tab==='forgot');
+  document.getElementById('authSuccessState').classList.remove('show');
+  document.getElementById('authTabLogin').classList.toggle('active', tab==='login');
+  document.getElementById('authTabRegister').classList.toggle('active', tab==='register');
+  // Clear errors
+  ['ovLoginError','ovRegError','ovForgotError'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.classList.remove('show');el.textContent='';}
+  });
+}
+
+function showOverlaySuccess(title, sub) {
+  ['authLoginForm','authRegisterForm','authForgotForm'].forEach(id=>{
+    document.getElementById(id).classList.remove('active');
+  });
+  const s = document.getElementById('authSuccessState');
+  document.getElementById('authSuccessText').textContent    = title;
+  document.getElementById('authSuccessSubtext').textContent = sub;
+  s.classList.add('show');
+}
+
+async function overlayLogin() {
+  const email = document.getElementById('ovEmail').value.trim();
+  const pass  = document.getElementById('ovPass').value;
+  if(!email||!pass){ showOverlayErr('ovLoginError','Completa todos los campos.'); return; }
+
+  const btn = document.getElementById('ovLoginBtn');
+  btn.disabled = true; btn.textContent = 'Verificando...';
+
+  try {
+    const users    = getUsers();
+    const passHash = await sha256(pass);
+    const user     = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.passHash === passHash);
+
+    if (!user) {
+      showOverlayErr('ovLoginError', 'Correo o contraseña incorrectos.');
+      btn.disabled = false; btn.textContent = 'Iniciar Sesión';
+      return;
+    }
+
+    setCurrentUser(user);
+    updateUIForUser(user);
+
+    const isAdmin = isAdminEmail(user.email);
+    showOverlaySuccess(
+      isAdmin ? '¡Bienvenido, Admin! 👑' : '¡Bienvenido de vuelta, ' + user.nombre + '!',
+      isAdmin ? 'Redirigiendo al panel...' : 'Cargando tu experiencia...'
+    );
+    if (isAdmin) {
+      setTimeout(() => { window.location.href = 'admin.html'; }, 1800);
+    }
+  } catch(e) {
+    showOverlayErr('ovLoginError', 'Error al iniciar sesión. Intenta de nuevo.');
+  } finally { btn.disabled=false; btn.textContent='Iniciar Sesión'; }
+}
+
+async function overlayRegister() {
+  const nombre   = document.getElementById('ovNombre').value.trim();
+  const apellido = document.getElementById('ovApellido').value.trim();
+  const email    = document.getElementById('ovRegEmail').value.trim();
+  const telefono = document.getElementById('ovTelefono').value.trim();
+  const fechaNac = document.getElementById('ovFechaNac').value;
+  const pass     = document.getElementById('ovRegPass').value;
+
+  if(!nombre||!apellido||!email||!telefono||!fechaNac||!pass) {
+    showOverlayErr('ovRegError','Todos los campos son obligatorios.'); return;
+  }
+  if(!email.includes('@')) {
+    showOverlayErr('ovRegError','Ingresa un correo electrónico válido.'); return;
+  }
+  if(pass.length < 6) {
+    showOverlayErr('ovRegError','La contraseña debe tener mínimo 6 caracteres.'); return;
+  }
+
+  // Verificar si el correo ya existe
+  const users = getUsers();
+  if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+    showOverlayErr('ovRegError','Este correo ya está registrado. ¿Olvidaste tu contraseña?'); return;
+  }
+
+  const btn = document.getElementById('ovRegBtn');
+  btn.disabled = true; btn.textContent = 'Creando cuenta...';
+
+  try {
+    const passHash = await sha256(pass);
+    const isAdmin  = isAdminEmail(email);
+    const newUser  = {
+      id:        'u_' + Date.now().toString(36),
+      nombre,
+      apellido,
+      name:      nombre + ' ' + apellido,
+      email,
+      passHash,
+      telefono,
+      phone:     telefono,
+      fechaNac,
+      rol:       isAdmin ? 'admin' : 'cliente',
+      createdAt: new Date().toLocaleDateString('es-DO')
+    };
+    users.push(newUser);
+    saveUsers(users);
+
+    // Guardar también en cl_users para que el admin lo vea como "usuario registrado"
+    // (ya está en cl_users porque es el mismo array)
+
+    setCurrentUser(newUser);
+    updateUIForUser(newUser);
+    showOverlaySuccess('¡Cuenta creada!', 'Bienvenido, ' + nombre + ' 👋');
+  } catch(e) {
+    showOverlayErr('ovRegError', 'Error al crear cuenta. Intenta de nuevo.');
+  } finally { btn.disabled=false; btn.textContent='Crear Cuenta'; }
+}
+
+async function overlayForgot() {
+  const email = document.getElementById('ovForgotEmail').value.trim();
+  if(!email){ showOverlayErr('ovForgotError','Ingresa tu correo.'); return; }
+  const users = getUsers();
+  const user  = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (!user) {
+    showOverlayErr('ovForgotError','No encontramos ninguna cuenta con ese correo.');
+    return;
+  }
+  // Sin servidor de email — mostrar la contraseña no es posible de forma segura.
+  // Informar al usuario que contacte al admin.
+  showOverlaySuccess('Cuenta encontrada', 'Contacta a creativelab824@gmail.com para restablecer tu contraseña.');
+}
+
+function showOverlayErr(id, msg) {
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+}
+
+/* ══════════════════════════════
+   FIREBASE AUTH ACTIONS (modal)
+══════════════════════════════ */
+async function doLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass  = document.getElementById('loginPass').value;
+  const err   = document.getElementById('loginError');
+  err.classList.remove('show');
+  try{
+    const users    = getUsers();
+    const passHash = await sha256(pass);
+    const user     = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.passHash === passHash);
+    if(!user){ err.textContent = lang==='es'?'Correo o contraseña incorrectos.':'Invalid email or password.'; err.classList.add('show'); return; }
+    setCurrentUser(user);
+    updateUIForUser(user);
+    showAuthSuccess(lang==='es'?'¡Sesión iniciada!':'Signed in successfully!');
+    setTimeout(()=>closeModal('authModal'),2000);
+  }catch(e){
+    err.textContent=lang==='es'?'Error al iniciar sesión.':'Sign in error.';
+    err.classList.add('show');
+  }
+}
+
+async function doRegister(){
+  const name  = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const pass  = document.getElementById('regPass').value;
+  const phone = document.getElementById('regPhone')?.value?.trim()||'';
+  const err   = document.getElementById('registerError');
+  err.classList.remove('show');
+  if(pass.length<6){err.textContent=lang==='es'?'Mínimo 6 caracteres.':'Minimum 6 characters.';err.classList.add('show');return;}
+  const users = getUsers();
+  if(users.find(u=>u.email.toLowerCase()===email.toLowerCase())){
+    err.textContent=lang==='es'?'Este correo ya está registrado.':'Email already registered.';err.classList.add('show');return;
+  }
+  try{
+    const passHash = await sha256(pass);
+    const newUser  = { id:'u_'+Date.now().toString(36), nombre:name, apellido:'', email, passHash, telefono:phone, rol:'cliente', createdAt:new Date().toLocaleDateString('es-DO') };
+    users.push(newUser);
+    saveUsers(users);
+    setCurrentUser(newUser);
+    updateUIForUser(newUser);
+    showAuthSuccess(lang==='es'?'¡Cuenta creada exitosamente!':'Account created successfully!');
+    setTimeout(()=>closeModal('authModal'),2000);
+    sendRegistrationEmails(name, email, phone);
+  }catch(e){
+    err.textContent=e.message; err.classList.add('show');
+  }
+}
+
+async function sendRegistrationEmails(name, email, phone) {
+  const PUBLIC_KEY       = 'yg8U6qVh6u7UJiT2u';
+  const SERVICE_ID       = 'service_gw7xtdq';
+  const TEMPLATE_NOTIFY  = 'template_j9tydla';
+  const TEMPLATE_WELCOME = 'template_rjiqho9';
+  try {
+    if(typeof emailjs === 'undefined') {
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js';
+        s.onload=()=>{emailjs.init(PUBLIC_KEY);res();};
+        s.onerror=rej;
+        document.head.appendChild(s);
+      });
+    } else {
+      emailjs.init(PUBLIC_KEY);
+    }
+    const now = new Date().toLocaleString('es-DO',{dateStyle:'full',timeStyle:'short'});
+    await emailjs.send(SERVICE_ID, TEMPLATE_NOTIFY, {
+      client_name:   name,
+      client_email:  email,
+      client_phone:  phone || 'No proporcionado',
+      register_date: now,
+    });
+    await emailjs.send(SERVICE_ID, TEMPLATE_WELCOME, {
+      client_name:  name,
+      client_email: email,
+    });
+  } catch(e) {
+    console.warn('[CreativeLab] EmailJS:', e);
+  }
+}
+
+async function doForgotPassword(){
+  const email = document.getElementById('forgotEmail').value.trim();
+  const err   = document.getElementById('forgotError');
+  err.classList.remove('show');
+  const users = getUsers();
+  if(!users.find(u=>u.email.toLowerCase()===email.toLowerCase())){
+    err.textContent=lang==='es'?'No encontramos ese correo.':'Email not found.';
+    err.classList.add('show');
+    return;
+  }
+  showAuthSuccess(lang==='es'?'Cuenta encontrada':'Account found', lang==='es'?'Contacta a creativelab824@gmail.com para recuperar tu contraseña.':'Contact creativelab824@gmail.com to recover your password.');
+}
+
+function showAuthSuccess(msg){
+  ['loginForm','registerForm','forgotForm'].forEach(id=>document.getElementById(id).style.display='none');
+  const s=document.getElementById('authSuccess');
+  document.getElementById('authSuccessMsg').textContent=msg;
+  s.style.display='flex';
+}
+
+function doLogout(){
+  clearCurrentUser();
+  updateUIForUser(null);
+  switchAuthTab('login');
+}
+
+/* ══════════════════════════════
+   PROFILE EDIT
+══════════════════════════════ */
+function openProfileEdit(){
+  const user = getCurrentUser();
+  if(user){
+    document.getElementById('editName').value     = user.nombre || '';
+    document.getElementById('editLastName').value = user.apellido || '';
+    document.getElementById('editEmail').value    = user.email || '';
+    try { document.getElementById('editPhone').value = user.telefono || ''; } catch(e){}
+    const isAdmin = isAdminEmail(user.email);
+    const badge   = document.getElementById('profileRoleBadge');
+    if(isAdmin){
+      badge.textContent='👑 Administrador';
+      badge.className='role-badge admin';
+    } else {
+      badge.textContent='Cliente';
+      badge.className='role-badge cliente';
+    }
+  }
+  openModal('profileEditModal');
+}
+
+async function saveProfileEdit(){
+  const user    = getCurrentUser();
+  if(!user) return;
+  const newPass = document.getElementById('editNewPass').value;
+  const curPass = document.getElementById('editCurrentPass').value;
+  const err     = document.getElementById('editError');
+  err.classList.remove('show');
+
+  try {
+    const users = getUsers();
+    const idx   = users.findIndex(u => u.id === user.id);
+    if(idx === -1) return;
+
+    if(newPass) {
+      if(!curPass){ err.textContent='Ingresa tu contraseña actual para cambiarla.'; err.classList.add('show'); return; }
+      const curHash = await sha256(curPass);
+      if(curHash !== users[idx].passHash){ err.textContent='Contraseña actual incorrecta.'; err.classList.add('show'); return; }
+      if(newPass.length < 6){ err.textContent='La nueva contraseña debe tener mínimo 6 caracteres.'; err.classList.add('show'); return; }
+      users[idx].passHash = await sha256(newPass);
+    }
+
+    // Update name/phone if fields exist
+    try {
+      const nm = document.getElementById('editName').value.trim();
+      const ap = document.getElementById('editLastName').value.trim();
+      const ph = document.getElementById('editPhone').value.trim();
+      if(nm) users[idx].nombre   = nm;
+      if(ap) users[idx].apellido = ap;
+      if(ph) users[idx].telefono = ph;
+    } catch(e){}
+
+    saveUsers(users);
+    setCurrentUser(users[idx]);
+    updateUIForUser(users[idx]);
+    closeModal('profileEditModal');
+    alert('¡Cambios guardados!');
+  } catch(e) {
+    err.textContent = 'Error al guardar cambios.';
+    err.classList.add('show');
+  }
+}
+
+/* ══════════════════════════════
+   PHOTO UPLOAD
+══════════════════════════════ */
+function loadPhoto(e){
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{
+    const img=document.getElementById('profileImg');
+    img.src=ev.target.result; img.style.display='block';
+    document.getElementById('photoPlaceholder').style.display='none';
+    const ring=document.getElementById('photoRing');
+    ring.style.animation='none'; ring.style.border='3px solid var(--accent)'; ring.style.boxShadow='0 0 24px rgba(255,45,45,.4)';
+  };
+  r.readAsDataURL(f);
+}
+
+/* ══════════════════════════════
+   DOWNLOAD PDF CV
+══════════════════════════════ */
+function downloadPDF(){
+  // Build PDF using pure HTML/CSS printed to a new window
+  const content = `
+    <html><head><title>CreativeLab CV</title>
+    <style>
+      body{font-family:Arial,sans-serif;background:#050508;color:#f0eee8;padding:40px;max-width:700px;margin:0 auto;}
+      h1{font-size:3rem;color:#ff2d2d;margin-bottom:0;letter-spacing:.1em;}
+      h2{font-size:1.2rem;color:#f0eee8;font-weight:400;margin-top:.3rem;margin-bottom:2rem;color:#6b6878;}
+      .section{margin-bottom:2rem;}
+      .section h3{color:#ff2d2d;font-size:.8rem;letter-spacing:.2em;text-transform:uppercase;margin-bottom:.8rem;border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:.5rem;}
+      .row{display:flex;justify-content:space-between;margin-bottom:.5rem;font-size:.9rem;}
+      .label{color:#6b6878;} .value{font-weight:bold;}
+      .skills{display:flex;flex-wrap:wrap;gap:.5rem;}
+      .skill{background:rgba(255,45,45,.15);border:1px solid rgba(255,45,45,.3);border-radius:100px;padding:.3rem .8rem;font-size:.8rem;}
+      @media print{body{background:white;color:black;} .skill{border-color:#ff2d2d;} h1,h2,.section h3{color:#ff2d2d;}}
+    
+.adw-section { display: none; }
+.adw-section.active { display: block; }
+
+/* Stats */
+.adw-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: .7rem; margin-bottom: 1.5rem; }
+.adw-stat { background: #0d0d14; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; padding: 1rem; text-align: center; }
+.adw-stat-num { font-family: 'Bebas Neue', sans-serif; font-size: 2.2rem; line-height: 1; color: #ff2d2d; }
+.adw-stat-lbl { font-size: .65rem; letter-spacing: .14em; text-transform: uppercase; color: #6b6878; margin-top: .3rem; }
+
+/* Table */
+.adw-table-wrap { background: #0d0d14; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; overflow: hidden; margin-bottom: 1.5rem; overflow-x: auto; }
+.adw-table-hdr { display: flex; align-items: center; justify-content: space-between; padding: .9rem 1.2rem; border-bottom: 1px solid rgba(255,255,255,.07); }
+.adw-table-ttl { font-size: .78rem; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
+.adw-table-wrap table { width: 100%; border-collapse: collapse; min-width: 400px; }
+.adw-table-wrap th { font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: #6b6878; padding: .65rem 1rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,.07); }
+.adw-table-wrap td { font-size: .78rem; padding: .65rem 1rem; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: middle; color: #f0eee8; }
+.adw-table-wrap tr:last-child td { border-bottom: none; }
+.adw-table-wrap tr:hover td { background: rgba(255,255,255,.02); }
+
+/* Status badges */
+.adw-badge-p { display:inline-block;padding:.15rem .6rem;border-radius:100px;font-size:.62rem;font-weight:800;letter-spacing:.1em;background:rgba(255,200,0,.12);color:#ffc800;border:1px solid rgba(255,200,0,.25); }
+.adw-badge-d { display:inline-block;padding:.15rem .6rem;border-radius:100px;font-size:.62rem;font-weight:800;letter-spacing:.1em;background:rgba(0,200,100,.12);color:#00c864;border:1px solid rgba(0,200,100,.25); }
+
+/* Buttons in drawer */
+.adw-btn { display:inline-flex;align-items:center;justify-content:center;font-family:'Barlow',sans-serif;font-size:.72rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase;padding:.35rem .8rem;border-radius:100px;border:none;cursor:pointer;transition:all .2s; }
+.adw-btn-red { background:#ff2d2d;color:#fff; }
+.adw-btn-outline { background:transparent;color:#f0eee8;border:1.5px solid rgba(255,255,255,.12); }
+.adw-btn-outline:hover { border-color:#ff2d2d; }
+.adw-btn-danger { background:#1a0a0a;color:#ff2d2d;border:1px solid rgba(255,45,45,.3); }
+.adw-btn-danger:hover { background:rgba(255,45,45,.15); }
+
+/* Calendar in drawer */
+.adw-cal-controls { display:flex;align-items:center;gap:.8rem;margin-bottom:1rem; }
+.adw-cal-month { font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:.06em;color:#f0eee8; }
+.adw-cal-grid { display:grid;grid-template-columns:repeat(7,1fr);gap:.3rem;margin-bottom:1.2rem; }
+.adw-cal-hdr { font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:#6b6878;text-align:center;padding:.3rem 0; }
+.adw-cal-day { background:#0d0d14;border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:.5rem .3rem;text-align:center;cursor:pointer;transition:all .2s;min-height:48px;position:relative; }
+.adw-cal-day:hover { border-color:rgba(255,255,255,.2); }
+.adw-cal-day.occ { background:rgba(255,45,45,.1);border-color:rgba(255,45,45,.3); }
+.adw-cal-day.occ .adw-cal-num { color:#ff2d2d; }
+.adw-cal-day.tod { border-color:#ff2d2d;box-shadow:0 0 10px rgba(255,45,45,.2); }
+.adw-cal-day.other { opacity:.3; }
+.adw-cal-num { font-size:.8rem;font-weight:900;color:#f0eee8; }
+.adw-cal-dot { position:absolute;bottom:.3rem;left:50%;transform:translateX(-50%);width:4px;height:4px;background:#ff2d2d;border-radius:50%; }
+
+/* Add event form */
+.adw-form { background:#0d0d14;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:1rem;margin-bottom:1.2rem; }
+.adw-form label { font-size:.62rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#6b6878;display:block;margin-bottom:.3rem; }
+.adw-input { background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:.6rem .9rem;color:#f0eee8;font-family:'Barlow',sans-serif;font-weight:700;font-size:.82rem;outline:none;width:100%;transition:border-color .2s;margin-bottom:.6rem; }
+.adw-input:focus { border-color:#ff2d2d; }
+.adw-row { display:grid;grid-template-columns:1fr 1fr;gap:.7rem; }
+.adw-page-title { font-family:'Bebas Neue',sans-serif;font-size:1.8rem;letter-spacing:.05em;color:#f0eee8;margin-bottom:1.2rem; }
+
+/* Modal del drawer */
+#adwEventModal { position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:9000;opacity:0;pointer-events:none;transition:opacity .3s; }
+#adwEventModal.open { opacity:1;pointer-events:all; }
+.adw-modal-card { background:#0d0d14;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:1.8rem;width:90%;max-width:380px;position:relative; }
+.adw-modal-close { position:absolute;top:.8rem;right:.8rem;width:28px;height:28px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.07);border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b6878;font-size:.8rem; }
+.adw-modal-close:hover { background:#ff2d2d;color:#fff; }
+.adw-modal-title { font-weight:900;font-size:1rem;margin-bottom:1rem;color:#f0eee8; }
+.adw-modal-actions { display:flex;gap:.6rem;margin-top:1rem; }
+
+@media(max-width:600px){
+  #adminDrawer { width: 100vw; }
+  .adw-sidebar { width: 54px; padding: 1rem .4rem; }
+  .adw-logo, .adw-nav-item span, .adw-user .adw-info { display: none; }
+  .adw-nav-item { justify-content: center; }
+  .adw-stats { grid-template-columns: 1fr; }
+}
+</style></head>
+    <body>
+      <h1>CREATIVELAB</h1>
+      <h2>Josué — Graphic Designer, Filmmaker, Photographer & Videographer</h2>
+      <div class="section">
+        <h3>Personal Info</h3>
+        <div class="row"><span class="label">Age</span><span class="value">17+</span></div>
+        <div class="row"><span class="label">Email</span><span class="value">Creativelab824@gmail.com</span></div>
+        <div class="row"><span class="label">Phone</span><span class="value">849 454 7811</span></div>
+        <div class="row"><span class="label">Location</span><span class="value">Dominican Republic</span></div>
+      </div>
+      <div class="section">
+        <h3>Experience</h3>
+        <div class="row"><span class="label">Graphic Design</span><span class="value">6 Years</span></div>
+        <div class="row"><span class="label">Professional Work</span><span class="value">4 Years</span></div>
+        <div class="row"><span class="label">Projects Delivered</span><span class="value">200+</span></div>
+        <div class="row"><span class="label">Happy Clients</span><span class="value">80+</span></div>
+      </div>
+      <div class="section">
+        <h3>Skills</h3>
+        <div class="skills">
+          <span class="skill">Logo Design</span><span class="skill">Brand Identity</span>
+          <span class="skill">Flyer Design</span><span class="skill">YouTube Thumbnails</span>
+          <span class="skill">Social Media Graphics</span><span class="skill">Filmmaking</span>
+          <span class="skill">Video Editing</span><span class="skill">Photography</span>
+          <span class="skill">Videography</span><span class="skill">Adobe Photoshop</span>
+          <span class="skill">Adobe Illustrator</span><span class="skill">Adobe Premiere</span>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Services Offered</h3>
+        <div class="row"><span class="label">Logos & Branding</span><span class="value">✓</span></div>
+        <div class="row"><span class="label">Flyers & Posters</span><span class="value">✓</span></div>
+        <div class="row"><span class="label">YouTube Thumbnails</span><span class="value">✓</span></div>
+        <div class="row"><span class="label">Social Media Packs</span><span class="value">✓</span></div>
+        <div class="row"><span class="label">Video Editing & Reels</span><span class="value">✓</span></div>
+        <div class="row"><span class="label">Short Films</span><span class="value">✓</span></div>
+        <div class="row"><span class="label">Photography</span><span class="value">✓</span></div>
+      </div>
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (w) { w.document.write(content); w.document.close(); setTimeout(() => w.print(), 400); }
+}
+</script>
+
+<!-- ══ BOTÓN FLOTANTE ADMIN ══ -->
+<button id="adminOpenBtn" onclick="openAdminDrawer()" title="Panel Admin">
+  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+  Admin
+</button>
+
+<!-- ══ OVERLAY FONDO ══ -->
+<div id="adminDrawerOverlay" onclick="closeAdminDrawer()"></div>
+
+<!-- ══ ADMIN DRAWER ══ -->
+<div id="adminDrawer">
+  <!-- Botón de cerrar en el borde -->
+  <button class="adw-close-btn" onclick="closeAdminDrawer()" title="Cerrar panel">✕</button>
+
+  <!-- SIDEBAR -->
+  <aside class="adw-sidebar">
+    <div class="adw-logo">CL<span>.</span></div>
+    <div class="adw-nav-item active" onclick="adwSection('dashboard')" id="adw-nav-dashboard">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>Dashboard</span>
+    </div>
+    <div class="adw-nav-item" onclick="adwSection('requests')" id="adw-nav-requests">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <span>Pendientes</span>
+    </div>
+    <div class="adw-nav-item" onclick="adwSection('calendar')" id="adw-nav-calendar">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span>Agendas</span>
+    </div>
+    <div class="adw-nav-item" onclick="adwSection('users')" id="adw-nav-users">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      <span>Usuarios</span>
+    </div>
+    <div class="adw-bottom">
+      <div class="adw-user">
+        <div class="adw-avatar">J</div>
+        <div class="adw-info" style="font-size:.7rem;">
+          <div style="font-weight:800;color:#f0eee8;">Josué</div>
+          <div style="color:#6b6878;font-size:.62rem;">Admin</div>
+        </div>
+      </div>
+      <button class="adw-btn adw-btn-outline" style="width:100%;font-size:.7rem;" onclick="doLogout()">Cerrar Sesión</button>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <div class="adw-main">
+
+    <!-- DASHBOARD -->
+    <div class="adw-section active" id="adw-section-dashboard">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem;">
+        <div class="adw-page-title">Dashboard</div>
+        <span style="background:rgba(255,45,45,.15);color:#ff2d2d;border:1px solid rgba(255,45,45,.25);border-radius:100px;padding:.2rem .7rem;font-size:.68rem;font-weight:800;letter-spacing:.1em;" id="adwTodayDate"></span>
+      </div>
+      <div class="adw-stats">
+        <div class="adw-stat"><div class="adw-stat-num" id="adwStatReq">0</div><div class="adw-stat-lbl">Pendientes</div></div>
+        <div class="adw-stat"><div class="adw-stat-num" id="adwStatEvt">0</div><div class="adw-stat-lbl">Eventos</div></div>
+        <div class="adw-stat"><div class="adw-stat-num" id="adwStatUsr">0</div><div class="adw-stat-lbl">Usuarios</div></div>
+      </div>
+      <div class="adw-table-wrap">
+        <div class="adw-table-hdr"><span class="adw-table-ttl">Últimas Solicitudes</span></div>
+        <table><thead><tr><th>Nombre</th><th>Servicio</th><th>Fecha</th><th>Estado</th></tr></thead>
+        <tbody id="adwDashBody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- PENDIENTES -->
+    <div class="adw-section" id="adw-section-requests">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem;">
+        <div class="adw-page-title">Pendientes</div>
+        <span style="background:rgba(255,45,45,.15);color:#ff2d2d;border:1px solid rgba(255,45,45,.25);border-radius:100px;padding:.2rem .7rem;font-size:.68rem;font-weight:800;" id="adwReqCount">0</span>
+      </div>
+      <div class="adw-table-wrap">
+        <table><thead><tr><th>Nombre</th><th>Servicio</th><th>Mensaje</th><th>Fecha</th><th>Estado</th><th>Acción</th></tr></thead>
+        <tbody id="adwReqBody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- AGENDAS -->
+    <div class="adw-section" id="adw-section-calendar">
+      <div class="adw-page-title">Agendas</div>
+      <div class="adw-form">
+        <label>Agregar Evento</label>
+        <div class="adw-row" style="margin-bottom:.6rem;">
+          <div><label>Fecha</label><input class="adw-input" type="date" id="adwNewDate"/></div>
+          <div><label>Descripción</label><input class="adw-input" type="text" id="adwNewDesc" placeholder="Ej: Reunión"/></div>
+        </div>
+        <button class="adw-btn adw-btn-red" onclick="adwAddEvent()">+ Agregar</button>
+      </div>
+      <div class="adw-cal-controls">
+        <button class="adw-btn adw-btn-outline" onclick="adwChangeMonth(-1)">← Ant</button>
+        <span class="adw-cal-month" id="adwCalLabel"></span>
+        <button class="adw-btn adw-btn-outline" onclick="adwChangeMonth(1)">Sig →</button>
+      </div>
+      <div class="adw-cal-grid" style="margin-bottom:.5rem;">
+        <div class="adw-cal-hdr">Do</div><div class="adw-cal-hdr">Lu</div><div class="adw-cal-hdr">Ma</div>
+        <div class="adw-cal-hdr">Mi</div><div class="adw-cal-hdr">Ju</div><div class="adw-cal-hdr">Vi</div>
+        <div class="adw-cal-hdr">Sa</div>
+      </div>
+      <div class="adw-cal-grid" id="adwCalGrid"></div>
+      <div class="adw-table-wrap">
+        <div class="adw-table-hdr"><span class="adw-table-ttl">Lista de Eventos</span></div>
+        <table><thead><tr><th>Fecha</th><th>Descripción</th><th>Acción</th></tr></thead>
+        <tbody id="adwEvtBody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- USUARIOS -->
+    <div class="adw-section" id="adw-section-users">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem;">
+        <div class="adw-page-title">Usuarios</div>
+        <span style="background:rgba(255,45,45,.15);color:#ff2d2d;border:1px solid rgba(255,45,45,.25);border-radius:100px;padding:.2rem .7rem;font-size:.68rem;font-weight:800;" id="adwUsrCount">0</span>
+      </div>
+      <div class="adw-table-wrap">
+        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Registrado</th></tr></thead>
+        <tbody id="adwUsrBody"></tbody></table>
+      </div>
+    </div>
+
+  </div><!-- /adw-main -->
+</div><!-- /adminDrawer -->
+
+<!-- Modal editar evento -->
+<div id="adwEventModal" onclick="if(event.target===this)adwCloseModal()">
+  <div class="adw-modal-card">
+    <button class="adw-modal-close" onclick="adwCloseModal()">✕</button>
+    <div class="adw-modal-title" id="adwModalTitle">Evento</div>
+    <label style="font-size:.62rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#6b6878;">Fecha</label>
+    <input class="adw-input" type="date" id="adwEditDate" style="margin-bottom:.6rem;"/>
+    <label style="font-size:.62rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#6b6878;">Descripción</label>
+    <input class="adw-input" type="text" id="adwEditDesc"/>
+    <div class="adw-modal-actions">
+      <button class="adw-btn adw-btn-red" style="flex:1;" onclick="adwSaveEvent()">Guardar</button>
+      <button class="adw-btn adw-btn-danger" style="flex:1;" onclick="adwDeleteEvent()">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════
+   ADMIN DRAWER — lógica completa
+══════════════════════════════════════════════════ */
+
+// ── Abrir / Cerrar ──
+function openAdminDrawer() {
+  document.getElementById('adminDrawer').classList.add('open');
+  document.getElementById('adminDrawerOverlay').classList.add('show');
+  document.body.style.overflow = 'hidden';
+  adwLoadAll();
+}
+function closeAdminDrawer() {
+  document.getElementById('adminDrawer').classList.remove('open');
+  document.getElementById('adminDrawerOverlay').classList.remove('show');
+  document.body.style.overflow = '';
+}
+
+// ── Navegación de secciones ──
+function adwSection(name) {
+  document.querySelectorAll('.adw-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.adw-nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('adw-section-' + name).classList.add('active');
+  document.getElementById('adw-nav-' + name).classList.add('active');
+}
+
+// ── Cargar todo ──
+function adwLoadAll() {
+  document.getElementById('adwTodayDate').textContent = new Date().toLocaleDateString('es-DO', {weekday:'short', year:'numeric', month:'short', day:'numeric'});
+  adwLoadRequests();
+  adwLoadEvents();
+  adwLoadUsers();
+}
+
+/* ── SOLICITUDES ── */
+function getData(k) { try { return JSON.parse(localStorage.getItem(k) || '[]'); } catch { return []; } }
+function setData(k,v) { localStorage.setItem(k, JSON.stringify(v)); }
+function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+
+let adwRequests = [];
+function adwLoadRequests() {
+  adwRequests = getData('cl_requests');
+  const pending = adwRequests.filter(r => r.status !== 'done').length;
+  document.getElementById('adwStatReq').textContent  = pending;
+  document.getElementById('adwReqCount').textContent = adwRequests.length;
+  adwRenderRequests();
+  adwRenderDash();
+}
+function adwRenderRequests() {
+  const body = document.getElementById('adwReqBody');
+  if (!adwRequests.length) { body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#6b6878;padding:1.5rem;">No hay solicitudes.</td></tr>'; return; }
+  body.innerHTML = [...adwRequests].reverse().map(r => `
+    <tr>
+      <td>${r.name||r.nombre||'—'}</td>
+      <td>${r.service||r.servicio||'—'}</td>
+      <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.message||r.mensaje||'—'}</td>
+      <td>${r.date||r.fecha||'—'}</td>
+      <td>${r.status==='done'?'<span class="adw-badge-d">Listo</span>':'<span class="adw-badge-p">Pendiente</span>'}</td>
+      <td style="display:flex;gap:.3rem;flex-wrap:wrap;">
+        ${r.status!=='done'?`<button class="adw-btn adw-btn-outline" style="font-size:.65rem;" onclick="adwMarkDone('${r.id}')">✓</button>`:''}
+        <button class="adw-btn adw-btn-danger" style="font-size:.65rem;" onclick="adwDelReq('${r.id}')">✕</button>
+      </td>
+    </tr>`).join('');
+}
+function adwRenderDash() {
+  const body = document.getElementById('adwDashBody');
+  const rec  = [...adwRequests].reverse().slice(0,5);
+  if (!rec.length) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#6b6878;padding:1rem;">Sin solicitudes.</td></tr>'; return; }
+  body.innerHTML = rec.map(r => `<tr><td>${r.name||r.nombre||'—'}</td><td>${r.service||r.servicio||'—'}</td><td>${r.date||r.fecha||'—'}</td><td>${r.status==='done'?'<span class="adw-badge-d">Listo</span>':'<span class="adw-badge-p">Pendiente</span>'}</td></tr>`).join('');
+}
+function adwMarkDone(id) {
+  adwRequests = adwRequests.map(r => r.id===id ? {...r, status:'done'} : r);
+  setData('cl_requests', adwRequests);
+  adwLoadRequests();
+}
+function adwDelReq(id) {
+  if(!confirm('¿Eliminar solicitud?')) return;
+  adwRequests = adwRequests.filter(r => r.id!==id);
+  setData('cl_requests', adwRequests);
+  adwLoadRequests();
+}
+
+/* ── EVENTOS / CALENDARIO ── */
+let adwEvents = [], adwMonth = new Date().getMonth(), adwYear = new Date().getFullYear();
+let adwEditingId = null;
+
+function adwLoadEvents() {
+  adwEvents = getData('cl_events');
+  document.getElementById('adwStatEvt').textContent = adwEvents.length;
+  adwRenderCal();
+  adwRenderEvtList();
+}
+function adwAddEvent() {
+  const date = document.getElementById('adwNewDate').value;
+  const desc = document.getElementById('adwNewDesc').value.trim();
+  if(!date||!desc) { alert('Completa fecha y descripción.'); return; }
+  adwEvents.push({ id: genId(), date, description: desc, status:'occupied', createdAt: new Date().toLocaleDateString('es-DO') });
+  setData('cl_events', adwEvents);
+  document.getElementById('adwNewDate').value = '';
+  document.getElementById('adwNewDesc').value = '';
+  adwLoadEvents();
+}
+function adwRenderCal() {
+  const months = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  document.getElementById('adwCalLabel').textContent = months[adwMonth] + ' ' + adwYear;
+  const grid = document.getElementById('adwCalGrid');
+  grid.innerHTML = '';
+  const today = new Date();
+  const first = new Date(adwYear, adwMonth, 1).getDay();
+  const days  = new Date(adwYear, adwMonth+1, 0).getDate();
+  const prev  = new Date(adwYear, adwMonth, 0).getDate();
+  for(let i=first-1;i>=0;i--){const d=document.createElement('div');d.className='adw-cal-day other';d.innerHTML=`<div class="adw-cal-num">${prev-i}</div>`;grid.appendChild(d);}
+  for(let d=1;d<=days;d++){
+    const ds=`${adwYear}-${String(adwMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const ev=adwEvents.filter(e=>e.date===ds);
+    const isT=today.getDate()===d&&today.getMonth()===adwMonth&&today.getFullYear()===adwYear;
+    const el=document.createElement('div');
+    el.className=`adw-cal-day${ev.length?' occ':''}${isT?' tod':''}`;
+    el.innerHTML=`<div class="adw-cal-num">${d}</div>${ev.length?'<div class="adw-cal-dot"></div>':''}`;
+    el.onclick=()=>{if(ev.length)adwOpenEdit(ev[0]);};
+    grid.appendChild(el);
+  }
+}
+function adwChangeMonth(d) {
+  adwMonth+=d;
+  if(adwMonth>11){adwMonth=0;adwYear++;}
+  if(adwMonth<0){adwMonth=11;adwYear--;}
+  adwRenderCal();
+}
+function adwRenderEvtList() {
+  const body = document.getElementById('adwEvtBody');
+  const s = [...adwEvents].sort((a,b)=>a.date<b.date?-1:1);
+  if(!s.length){body.innerHTML='<tr><td colspan="3" style="text-align:center;color:#6b6878;padding:1rem;">No hay eventos.</td></tr>';return;}
+  body.innerHTML=s.map(e=>`<tr><td>${e.date}</td><td>${e.description}</td><td style="display:flex;gap:.3rem;"><button class="adw-btn adw-btn-outline" style="font-size:.65rem;" onclick="adwOpenEditById('${e.id}')">✎</button><button class="adw-btn adw-btn-danger" style="font-size:.65rem;" onclick="adwDelEvt('${e.id}')">✕</button></td></tr>`).join('');
+}
+function adwOpenEditById(id) {
+  const evt = adwEvents.find(e => e.id === id);
+  if (evt) adwOpenEdit(evt);
+}
+function adwOpenEdit(evt) {
+  adwEditingId = evt.id;
+  document.getElementById('adwEditDate').value = evt.date||'';
+  document.getElementById('adwEditDesc').value = evt.description||'';
+  document.getElementById('adwModalTitle').textContent = 'Editar: ' + evt.date;
+  document.getElementById('adwEventModal').classList.add('open');
+}
+function adwCloseModal() { document.getElementById('adwEventModal').classList.remove('open'); }
+function adwSaveEvent() {
+  if(!adwEditingId) return;
+  adwEvents = adwEvents.map(e => e.id===adwEditingId ? {...e, date:document.getElementById('adwEditDate').value, description:document.getElementById('adwEditDesc').value.trim()} : e);
+  setData('cl_events', adwEvents);
+  adwCloseModal();
+  adwLoadEvents();
+}
+function adwDeleteEvent() {
+  if(!adwEditingId||!confirm('¿Eliminar evento?')) return;
+  adwEvents = adwEvents.filter(e => e.id!==adwEditingId);
+  setData('cl_events', adwEvents);
+  adwCloseModal();
+  adwEditingId = null;
+  adwLoadEvents();
+}
+function adwDelEvt(id) {
+  if(!confirm('¿Eliminar evento?')) return;
+  adwEvents = adwEvents.filter(e => e.id!==id);
+  setData('cl_events', adwEvents);
+  adwLoadEvents();
+}
+
+/* ── USUARIOS ── */
+function adwLoadUsers() {
+  const users = getData('cl_users').filter(u => !isAdminEmail(u.email));
+  document.getElementById('adwStatUsr').textContent = users.length;
+  document.getElementById('adwUsrCount').textContent = users.length;
+  const body = document.getElementById('adwUsrBody');
+  if(!users.length){body.innerHTML='<tr><td colspan="4" style="text-align:center;color:#6b6878;padding:1rem;">No hay usuarios.</td></tr>';return;}
+  body.innerHTML=users.map(u=>`<tr><td>${u.nombre||u.name||'—'} ${u.apellido||''}</td><td>${u.email||'—'}</td><td>${u.telefono||u.phone||'—'}</td><td>${u.createdAt||'—'}</td></tr>`).join('');
+}
+
+/* ── Mostrar botón admin cuando está logueado como admin ── */
+function checkAdminBtn() {
+  const user = getCurrentUser();
+  const btn  = document.getElementById('adminOpenBtn');
+  if(btn) btn.style.display = (user && isAdminEmail(user.email)) ? 'inline-flex' : 'none';
+}
+
+// Parchar updateUIForUser para que también muestre/oculte el botón flotante
+const _origUpdateUI = updateUIForUser;
+updateUIForUser = function(user) {
+  _origUpdateUI(user);
+  checkAdminBtn();
+  // Si es admin que acaba de hacer logout, cerrar drawer también
+  if(!user) closeAdminDrawer();
+};
+
+// Al cargar
+window.addEventListener('DOMContentLoaded', () => { checkAdminBtn(); });
+</script>
+
+</body>
+</html>
